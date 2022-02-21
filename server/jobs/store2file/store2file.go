@@ -49,7 +49,7 @@ func (j *Job) Run(ctx context.Context) (err error) {
 			tx.Each(proxystore.Services, func(kv *proxystore.KV) bool {
 				sae := ServiceAndEndpoints{
 					Service:      kv.Service.Service,
-					TopologyKeys: kv.Service.TopologyKeys,
+					// TopologyKeys: kv.Service.TopologyKeys,
 				}
 
 				tx.EachEndpointOfService(kv.Namespace, kv.Name, func(ep *localnetv1.EndpointInfo) {
