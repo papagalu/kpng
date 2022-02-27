@@ -155,7 +155,7 @@ func (s *Backend) Setup() {
 		winkernelConfig)
 
 	if err != nil {
-		klog.Fatal(err)
+		klog.ErrorS(err, "Failed to create an instance of NewProxier")
 	}
 
 }
