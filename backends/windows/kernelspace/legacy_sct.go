@@ -18,14 +18,16 @@ package kernelspace
 
 import (
 	"fmt"
-	"k8s.io/klog/v2"
 	"net"
 	"strings"
+
+	"k8s.io/klog/v2"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/events"
+
 	//"k8s.io/kubernetes/pkg/proxy/metrics"
 
 	localnetv1 "sigs.k8s.io/kpng/api/localnetv1"
@@ -306,12 +308,19 @@ func (sct *ServiceChangeTracker) Update(current *localnetv1.Service) bool {
 	if svc == nil {
 		return false
 	}
+
+	if sct == nil {
+		sct = &ServiceChangeTracker{}
+		sct.items = make(map[types.NamespacedName]*serviceChange)
+	}
+
 	//metrics.ServiceChangesTotal.Inc()
 	namespacedName := types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}
 	var change *serviceChange
 	var ok bool
 	if change, ok = sct.items[namespacedName]; !ok {
 		change = &serviceChange{}
+		sct.items = make(map[types.NamespacedName]*serviceChange)
 		sct.items[namespacedName] = change
 	}
 	*change = sct.serviceToServiceMap(current)
@@ -322,6 +331,11 @@ func (sct *ServiceChangeTracker) Update(current *localnetv1.Service) bool {
 
 func (sct *ServiceChangeTracker) Delete(namespace, name string) bool {
 	//metrics.ServiceChangesTotal.Inc()
+
+	if sct == nil {
+		return false
+	}
+
 	namespacedName := types.NamespacedName{Namespace: namespace, Name: name}
 	sct.items[namespacedName] = nil
 	klog.V(2).Infof("Service %s updated for delete", namespacedName)

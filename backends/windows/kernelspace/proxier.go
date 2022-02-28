@@ -136,10 +136,11 @@ func NewProxier(
 		if err != nil {
 			return nil, err
 		}
-		sourceVip = config.SourceVip
-		if len(sourceVip) == 0 {
-			return nil, fmt.Errorf("source-vip flag not set")
-		}
+		// TODO: Add Back the flag
+		//sourceVip = config.SourceVip
+		//if len(sourceVip) == 0 {
+		//		return nil, fmt.Errorf("source-vip flag not set")
+		//}
 
 		if nodeIP.IsUnspecified() {
 			// attempt to get the correct ip address
@@ -161,9 +162,10 @@ func NewProxier(
 				}
 			}
 		}
-		if len(hostMac) == 0 {
-			return nil, fmt.Errorf("could not find host mac address for %s", nodeIP)
-		}
+		// TODO: Add Back the flag
+		//if len(hostMac) == 0 {
+		//	return nil, fmt.Errorf("could not find host mac address for %s", nodeIP)
+		//}
 	}
 
 	isIPv6 := netutils.IsIPv6(nodeIP)
