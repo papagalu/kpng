@@ -60,8 +60,8 @@ func NewProxier(
 	masqueradeMark := fmt.Sprintf("%#08x/%#08x", masqueradeValue, masqueradeValue)
 
 	if nodeIP == nil {
-		klog.InfoS("Invalid nodeIP, initializing kube-proxy with 127.0.0.1 as nodeIP")
-		nodeIP = netutils.ParseIPSloppy("127.0.0.1")
+		klog.InfoS("Invalid nodeIP, initializing kube-proxy with 10.20.30.11 as nodeIP")
+		nodeIP = netutils.ParseIPSloppy("10.20.30.11")
 	}
 
 	if len(clusterCIDR) == 0 {

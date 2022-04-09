@@ -140,7 +140,7 @@ func (s *Backend) Setup() {
 		15*time.Second,
 		"sync period duration")
 
-	klog.V(0).InfoS("Using Windows Kernel Proxier.")
+	klog.V(0).InfoS("Using Windows Kernel Proxier. node ip  %v", nodeip)
 
 	//proxyMode := getProxyMode(string(config.Mode), WindowsKernelCompatTester{})
 	//dualStackMode := getDualStackMode(config.Winkernel.NetworkName, DualStackCompatTester{})
@@ -166,10 +166,12 @@ func (s *Backend) Setup() {
 }
 
 func (s *Backend) Sync() {
-	//proxier.Sync()
+	klog.V(0).InfoS("backend.Sync() ")
+	proxier.Sync()
 }
 
 func (s *Backend) WaitRequest() (nodeName string, err error) {
+	klog.V(0).InfoS("wait request")
 	name, _ := os.Hostname()
 	return name, nil
 }

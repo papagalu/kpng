@@ -39,6 +39,8 @@ func (Proxier *Proxier) Sync() {
 
 	// TODO commenting out metrics, Jay to fix , figure out how to  copy these later, avoiding pkg/proxy imports
 	// metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
+
+	klog.V(0).InfoS("proxier_sync.Sync ->")
 	Proxier.syncRunner.Run()
 }
 
