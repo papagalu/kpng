@@ -26,6 +26,8 @@ import (
 
 	"github.com/spf13/pflag"
 
+
+
 	"k8s.io/client-go/tools/events"
 	// 	"k8s.io/kubernetes/pkg/proxy/apis/config"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
@@ -112,6 +114,7 @@ func (s *Backend) DeleteEndpoint(namespace, serviceName, key string) {
 }
 
 func (s *Backend) SetService(svc *localnetv1.Service) {
+	klog.V(0).InfoS("SetService -> %v",svc)
 	proxierState.serviceChanges.Update(svc)
 
 }
@@ -125,6 +128,9 @@ func (s *Backend) SetEndpoint(
 	serviceName,
 	key string,
 	endpoint *localnetv1.Endpoint) {
+
+	// proxierState.endpointChanges.Update( )
+
 }
 
 func (s *Backend) Reset() {
