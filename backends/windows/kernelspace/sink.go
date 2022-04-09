@@ -20,7 +20,7 @@ limitations under the License.
 package kernelspace
 
 import (
-	"net"
+	//"net"
 	"os"
 	"time"
 
@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/kpng/client/localsink/decoder"
 	"sigs.k8s.io/kpng/client/localsink/filterreset"
 	"sigs.k8s.io/kpng/client/serviceevents"
-
+	netutils "k8s.io/utils/net"
 	klog "k8s.io/klog/v2"
 )
 
@@ -77,7 +77,12 @@ var (
 		"0.0.0.0/0",
 		"cluster IPs CIDR")
 
-	nodeIP          net.IP
+	// defaulting to the sig-windows-dev-tools value, should be 127.0.0.1?
+	nodeip = flag.String(
+		"nodeip",
+		"10.20.30.11",
+		"cluster IPs CIDR",
+	)
 	winkernelConfig KubeProxyWinkernelConfiguration
 )
 
@@ -149,7 +154,7 @@ func (s *Backend) Setup() {
 		*masqueradeBit,
 		*clusterCIDR,
 		*hostname,
-		nodeIP,
+		netutils.ParseIPSloppy(*nodeip),
 		recorder,
 		healthzServer,
 		winkernelConfig)
