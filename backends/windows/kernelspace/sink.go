@@ -129,7 +129,8 @@ func (s *Backend) SetEndpoint(
 	key string,
 	endpoint *localnetv1.Endpoint) {
 
-	// proxierState.endpointChanges.Update( )
+	proxierState.endpointChanges.EndpointUpdate(namespace, serviceName, key, endpoint)
+	// proxierStaite.endpointChanges.Update( )
 
 }
 
@@ -172,7 +173,7 @@ func (s *Backend) Setup() {
 }
 
 func (s *Backend) Sync() {
-	klog.V(0).InfoS("backend.Sync() ")
+	klog.V(0).InfoS("backend.Sync()")
 	proxier.Sync()
 }
 
