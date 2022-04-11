@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/events"
 
-	"sigs.k8s.io/kpng/api/localnetv1"
+	localnetv1 "sigs.k8s.io/kpng/api/localnetv1"
 
 
 	"k8s.io/klog/v2"
@@ -222,13 +222,16 @@ func (em EndpointsMap) getLocalReadyEndpointIPs() map[types.NamespacedName]sets.
 			// 	continue
 			// }
 
-			if endpointEntry.isLocal {
+			if endpointEntry.Local {
 				nsn := service
 				if localIPs[nsn] == nil {
 					localIPs[nsn] = sets.NewString()
 				}
 				// localIPs[nsn].Insert(endpointEntry.IPs.All()...)
-				localIPs[nsn].Insert(endpointEntry.ip)
+				// removed this ever since got rid of the windowsEndpoint
+				// 	localIPs[nsn].Insert(endpointEntry.ip)
+				//  not sure if the first IP works here or not....
+				localIPs[nsn].Insert(endpointEntry.IPs.All()[0])
 
 			}
 		}
