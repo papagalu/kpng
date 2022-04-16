@@ -55,7 +55,7 @@ func kpngFindEndpoint(ep *localnetv1.Endpoint) *windowsEndpoint, bool {
 	if len(kpngEndpoints) == 0 {
 		return nil, false
 	}
-
+// TODO 	b, err := json.Marshal(ep) and look up that string...
 	for k,v := range kpngEndpoints {
 		klog.V(0).Infos("kpngFindEndpoint, just returning it will figure out hashing later... %v %v", k, v)
 		return v, true
@@ -291,7 +291,7 @@ func (Proxier *Proxier) syncProxyRules() {
 					hnsEndpoint := &windowsEndpoint {
 						ip: windowsEndpoint.ip,
 						isLocal:	false,
-						macAddress:	conjureMac("02-11", netutils.ParseIPSloppy(ep.ip)),
+						macAddress:	conjureMac("02-11", netutils.ParseIPSloppy(windowsEndpoint.ip)),
 						providerAddress: providerAddress,
 					}
 					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
@@ -325,12 +325,12 @@ func (Proxier *Proxier) syncProxyRules() {
 			// a) Endpoints are any IP's outside the cluster ==> Choose NodeIP as the SourceVIP
 			// b) Endpoints are IP addresses of a remote node => Choose NodeIP as the SourceVIP
 			// c) Everything else (Local POD's, Remote POD's, Node IP of current node) ==> Choose the configured SourceVIP
-			if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !ep.GetIsLocal() {
+			if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !windowsEndpoint.GetIsLocal() {
 				providerAddress := Proxier.network.findRemoteSubnetProviderAddress(windowsEndpoint.IP())
 
-				isNodeIP := (ep.IP() == providerAddress)
+				isNodeIP := (windowsEndpoint.IP() == providerAddress)
 				isPublicIP := (len(providerAddress) == 0)
-				klog.InfoS("Endpoint on overlay network", "ip", ep.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
+				klog.InfoS("Endpoint on overlay network", "ip", windowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
 
 				containsNodeIP = containsNodeIP || isNodeIP
 				containsPublicIP = containsPublicIP || isPublicIP
@@ -347,7 +347,7 @@ func (Proxier *Proxier) syncProxyRules() {
                                 windowsEndpoint.refCount = Proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
                                 *windowsEndpoint.refCount++
                         }
-                        ep.hnsID = newHnsEndpoint.hnsID
+                        windowsEndpoint.hnsID = newHnsEndpoint.hnsID
 			klog.V(3).InfoS("Endpoint resource found and added to the hnsEndpoints array", "windowsEndpoint", windowsEndpoint)
 		}
 
