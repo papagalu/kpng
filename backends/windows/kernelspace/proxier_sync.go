@@ -20,6 +20,9 @@ limitations under the License.
 package kernelspace
 
 import (
+	"encoding/json"
+	"github.com/pkg/errors"
+	"sigs.k8s.io/kpng/api/localnetv1"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -37,29 +40,27 @@ func init()  {
 }
 
 func kpngStoreEndpoint(ep localnetv1.Endpoint, we *windowsEndpoint)   {
-	klog.V(0).InfoS("Serializing ep and searchng hnsIDs for it... %v %v", ep, we)
-	b, err := json.Marshal(ep)
+	klog.V(0).InfoS("Serializing ep and searching hnsIDs for it... %v %v", ep, we)
+	bytes, err := json.Marshal(ep)
 	if err != nil {
-		log.Infof("Error: %s", err)
+		klog.Infof("Error: %s", err)
 		return
 	}
-	kpngEndpoints[b] = we
-
+	kpngEndpoints[string(bytes)] = we
 }
-
-
 
 // important function that services the ep := epInfo code... we need to look up the corresponding
 // hns endpoint when that happens.
-func kpngFindEndpoint(ep *localnetv1.Endpoint) *windowsEndpoint, bool {
+func kpngFindEndpoint(ep *localnetv1.Endpoint) (*windowsEndpoint, bool) {
 	if len(kpngEndpoints) == 0 {
 		return nil, false
 	}
 // TODO 	b, err := json.Marshal(ep) and look up that string...
 	for k,v := range kpngEndpoints {
-		klog.V(0).Infos("kpngFindEndpoint, just returning it will figure out hashing later... %v %v", k, v)
+		klog.V(0).InfoS("kpngFindEndpoint, just returning it will figure out hashing later... %v %v", k, v)
 		return v, true
 	}
+	return nil, false
 }
 //// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
@@ -100,9 +101,27 @@ func (Proxier *Proxier) cleanupAllPolicies() {
 		}
 		endpoints := Proxier.endpointsMap[svcName.NamespacedName]
 		for _, e := range *endpoints {
-			svcInfo.cleanupAllPolicies(e)
+			hns, _ := newHostNetworkService()
+			we := &windowsEndpoint{
+				ip:              e.IPs.First(),
+				port:            0, // TODO
+				isLocal:         e.Local,
+				macAddress:      "TODO",
+				hnsID:           "TODO",
+				refCount:        nil, // TODO
+				providerAddress: "TODO",
+				hns:             hns,
+				ready:           true, // TODO should always be ready if kpng notifies us, right?
+				serving:         true, // TODO same as above?
+				terminating:     false, // TODO opposite of above?
+			}
+			svcInfo.cleanupAllPolicies(we)
 		}
 	}
+}
+
+func kpngGetHNS(endpoint *windowsEndpoint) string {
+	panic(any(errors.Errorf("TODO -- unimplemented placeholder")))
 }
 
 // This is where all of the hns save/restore calls happen.
@@ -221,7 +240,7 @@ func (Proxier *Proxier) syncProxyRules() {
 			// it is an localvnet1.Endpoint...
 			//			ep, ok := epInfo.(*windowsEndpoint)
 			// !!!!!!!!!!!!!!!!
-			windowsEndpoint, ok := kpngFindEndpoint(epInfo)
+			foundWindowsEndpoint, ok := kpngFindEndpoint(epInfo)
 			if !ok {
 				klog.ErrorS(nil, "Failed to recover a windows sEndpoint... skippingg, maybe no endpoints for this svc %v %v", "serviceName", svcName)
 				continue
@@ -251,23 +270,23 @@ func (Proxier *Proxier) syncProxyRules() {
 ////////////////////////////////////////////// we use that to write the "newHnsEndpoint" that we will put in the 
 /////////////////////////////////////////////// ARRAY of HNS Endpoints later...
 
-			if len(windowsEndpoint.hnsID) > 0 {
-				// new function 
-				hnsID := kpngGetHNS(windowsEndpoint)
+			if len(foundWindowsEndpoint.hnsID) > 0 {
+				// new function
+				hnsID := kpngGetHNS(foundWindowsEndpoint)
 				klog.InfoS("finished getting nhsID hnsID %v", hnsID)
 
-				newHnsEndpoint, err = hns.getEndpointByID( windowsEndpoint.hnsID )
+				newHnsEndpoint, err = hns.getEndpointByID( foundWindowsEndpoint.hnsID )
 			}
 
 			if newHnsEndpoint == nil {
 				// First check if an endpoint resource exists for this IP, on the current host
 				// A Local endpoint could exist here already
 				// A remote endpoint was already created and proxy was restarted
-				newHnsEndpoint, err = hns.getEndpointByIpAddress(windowsEndpoint.IP(), hnsNetworkName)
+				newHnsEndpoint, err = hns.getEndpointByIpAddress(foundWindowsEndpoint.IP(), hnsNetworkName)
 			}
 			if newHnsEndpoint == nil {
-				if windowsEndpoint.GetIsLocal() {
-					klog.ErrorS(err, "Local endpoint not found: on network", "ip", windowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName)
+				if foundWindowsEndpoint.GetIsLocal() {
+					klog.ErrorS(err, "Local endpoint not found: on network", "ip", foundWindowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName)
 					continue
 				}
 
@@ -281,17 +300,17 @@ func (Proxier *Proxier) syncProxyRules() {
 						return
 					}
 					Proxier.network = *updatedNetwork
-					providerAddress := Proxier.network.findRemoteSubnetProviderAddress(windowsEndpoint.IP())
+					providerAddress := Proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
 
 					if len(providerAddress) == 0 {
-						klog.InfoS("Could not find provider address, assuming it is a public IP", "IP", windowsEndpoint.IP())
+						klog.InfoS("Could not find provider address, assuming it is a public IP", "IP", foundWindowsEndpoint.IP())
 						providerAddress = Proxier.nodeIP.String()
 					}
 
 					hnsEndpoint := &windowsEndpoint {
-						ip: windowsEndpoint.ip,
+						ip: foundWindowsEndpoint.ip,
 						isLocal:	false,
-						macAddress:	conjureMac("02-11", netutils.ParseIPSloppy(windowsEndpoint.ip)),
+						macAddress:	conjureMac("02-11", netutils.ParseIPSloppy(foundWindowsEndpoint.ip)),
 						providerAddress: providerAddress,
 					}
 					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
@@ -301,16 +320,16 @@ func (Proxier *Proxier) syncProxyRules() {
 					}
 				} else {
 					hnsEndpoint := &windowsEndpoint{
-						ip: windowsEndpoint.ip,
+						ip: foundWindowsEndpoint.ip,
 						isLocal: false,
-						macAddress: windowsEndpoint.macAddress,
+						macAddress: foundWindowsEndpoint.macAddress,
 					}
 
 					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
-                                        if err != nil {
-                                               klog.ErrorS(err, "Remote endpoint creation failed")
-                                               continue
-                                        }
+					if err != nil {
+						   klog.ErrorS(err, "Remote endpoint creation failed")
+						   continue
+					}
 				}
 			}
 
@@ -325,33 +344,34 @@ func (Proxier *Proxier) syncProxyRules() {
 			// a) Endpoints are any IP's outside the cluster ==> Choose NodeIP as the SourceVIP
 			// b) Endpoints are IP addresses of a remote node => Choose NodeIP as the SourceVIP
 			// c) Everything else (Local POD's, Remote POD's, Node IP of current node) ==> Choose the configured SourceVIP
-			if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !windowsEndpoint.GetIsLocal() {
-				providerAddress := Proxier.network.findRemoteSubnetProviderAddress(windowsEndpoint.IP())
+			if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !foundWindowsEndpoint.GetIsLocal() {
+				providerAddress := Proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
 
-				isNodeIP := (windowsEndpoint.IP() == providerAddress)
-				isPublicIP := (len(providerAddress) == 0)
-				klog.InfoS("Endpoint on overlay network", "ip", windowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
+				isNodeIP := foundWindowsEndpoint.IP() == providerAddress
+				isPublicIP := len(providerAddress) == 0
+				klog.InfoS("Endpoint on overlay network", "ip", foundWindowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
 
 				containsNodeIP = containsNodeIP || isNodeIP
 				containsPublicIP = containsPublicIP || isPublicIP
 			}
 
-                        // Save the hnsId for reference
-                        klog.V(1).InfoS("Hns endpoint resource", "windowsEndpoint", newHnsEndpoint)
+			// Save the hnsId for reference
+			klog.V(1).InfoS("Hns endpoint resource", "windowsEndpoint", newHnsEndpoint)
 
-                        hnsEndpoints = append(hnsEndpoints, *newHnsEndpoint)
-                        if newHnsEndpoint.GetIsLocal() {
-                               hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
-                        } else {
-                                // We only share the refCounts for remote windowsEndpoint
-                                windowsEndpoint.refCount = Proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
-                                *windowsEndpoint.refCount++
-                        }
-                        windowsEndpoint.hnsID = newHnsEndpoint.hnsID
-			klog.V(3).InfoS("Endpoint resource found and added to the hnsEndpoints array", "windowsEndpoint", windowsEndpoint)
+			hnsEndpoints = append(hnsEndpoints, *newHnsEndpoint)
+			if newHnsEndpoint.GetIsLocal() {
+				   hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
+			} else {
+					// We only share the refCounts for remote windowsEndpoint
+					foundWindowsEndpoint.refCount = Proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
+					*foundWindowsEndpoint.refCount++
+			}
+			foundWindowsEndpoint.hnsID = newHnsEndpoint.hnsID
+			klog.V(3).InfoS("Endpoint resource found and added to the hnsEndpoints array", "windowsEndpoint", foundWindowsEndpoint)
 		}
 
-		kpngStoreEndpoint(windowsEndpoint) // remember this endpoint
+		// TODO there's no foundWindowsEndpoint in scope right now -- so what should this be?
+		//kpngStoreEndpoint(foundWindowsEndpoint) // remember this endpoint
 
 		klog.V(3).InfoS("Associated windowsEndpoint for service", "windowsEndpoint", hnsEndpoints, "serviceName", svcName)
 

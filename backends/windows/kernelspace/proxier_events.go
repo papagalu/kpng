@@ -147,7 +147,21 @@ func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 		// e := Proxier.endpointsMap[spn.NamespacedName]
 		endpoints := Proxier.endpointsMap[spn.NamespacedName]
 		for _, e := range *endpoints {
-			svcInfo.cleanupAllPolicies(e)
+			hns, _ := newHostNetworkService()
+			we := &windowsEndpoint{
+				ip:              e.IPs.First(),
+				port:            0, // TODO
+				isLocal:         e.Local,
+				macAddress:      "TODO",
+				hnsID:           "TODO",
+				refCount:        nil, // TODO
+				providerAddress: "TODO",
+				hns:             hns,
+				ready:           true, // TODO should always be ready if kpng notifies us, right?
+				serving:         true, // TODO same as above?
+				terminating:     false, // TODO opposite of above?
+			}
+			svcInfo.cleanupAllPolicies(we)
 		}
 	} else {
 		// If no service exists, just cleanup the remote windowsEndpoint
@@ -207,7 +221,21 @@ func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 		)
 		endpoints := Proxier.endpointsMap[spn.NamespacedName]
 		for _, e := range *endpoints {
-			svcInfo.cleanupAllPolicies(e)
+			hns, _ := newHostNetworkService()
+			we := &windowsEndpoint{
+				ip:              e.IPs.First(),
+				port:            0, // TODO
+				isLocal:         e.Local,
+				macAddress:      "TODO",
+				hnsID:           "TODO",
+				refCount:        nil, // TODO
+				providerAddress: "TODO",
+				hns:             hns,
+				ready:           true, // TODO should always be ready if kpng notifies us, right?
+				serving:         true, // TODO same as above?
+				terminating:     false, // TODO opposite of above?
+			}
+			svcInfo.cleanupAllPolicies(we)
 		}
 
 	}
