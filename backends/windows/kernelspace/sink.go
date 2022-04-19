@@ -26,19 +26,17 @@ import (
 
 	"github.com/spf13/pflag"
 
-
-
 	"k8s.io/client-go/tools/events"
+	klog "k8s.io/klog/v2"
 	// 	"k8s.io/kubernetes/pkg/proxy/apis/config"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
+	netutils "k8s.io/utils/net"
 	"sigs.k8s.io/kpng/api/localnetv1"
 	"sigs.k8s.io/kpng/client/backendcmd"
 	"sigs.k8s.io/kpng/client/localsink"
 	"sigs.k8s.io/kpng/client/localsink/decoder"
 	"sigs.k8s.io/kpng/client/localsink/filterreset"
 	"sigs.k8s.io/kpng/client/serviceevents"
-	netutils "k8s.io/utils/net"
-	klog "k8s.io/klog/v2"
 )
 
 type Backend struct {
@@ -129,9 +127,8 @@ func (s *Backend) SetEndpoint(
 	key string,
 	endpoint *localnetv1.Endpoint) {
 
-	proxierState.endpointChanges.EndpointUpdate(namespace, serviceName, key, endpoint)
+	proxierState.endpointsChanges.EndpointUpdate(namespace, serviceName, key, endpoint)
 	// proxierStaite.endpointChanges.Update( )
-
 }
 
 func (s *Backend) Reset() {
