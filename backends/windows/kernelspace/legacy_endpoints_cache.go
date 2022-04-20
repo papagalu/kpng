@@ -42,7 +42,6 @@ type EndpointsCache struct {
 // xxxxxxxxxxxxxxxxxxxxxxxx 4 compile error -----> windowsEndpoint
 type endpointsInfoByName map[string]*localnetv1.Endpoint
 
-
 // NewEndpointsCache initializes an EndpointCache.
 func NewEndpointsCache(hostname string, ipFamily v1.IPFamily, recorder events.EventRecorder) *EndpointsCache {
 	return &EndpointsCache{
@@ -53,9 +52,7 @@ func NewEndpointsCache(hostname string, ipFamily v1.IPFamily, recorder events.Ev
 	}
 }
 
-
-
-// xxxx 3 ---> now updatePending, write the localvnet1 endpoint 
+// xxxx 3 ---> now updatePending, write the localvnet1 endpoint
 // updatePending updates a pending slice in the cache.
 func (cache *EndpointsCache) updatePending(svcKey types.NamespacedName, key string, we *localnetv1.Endpoint) bool {
 	var esInfoMap *endpointsInfoByName
@@ -72,4 +69,3 @@ func (cache *EndpointsCache) updatePending(svcKey types.NamespacedName, key stri
 func (cache *EndpointsCache) isLocal(hostname string) bool {
 	return len(cache.hostname) > 0 && hostname == cache.hostname
 }
-

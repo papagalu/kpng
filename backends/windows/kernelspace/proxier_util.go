@@ -51,6 +51,8 @@ type Provider interface {
 // Proxier (windows/kernelspace/Proxier) is copied impl of windows kernel based proxy for connections between a localhost:lport
 // and services that provide the actual backends.
 type Proxier struct {
+	kpngEndpointCache *kpngEndpointCache
+
 	// TODO(imroc): implement node handler for winkernel proxier.
 	//proxyconfig.NoopNodeHandler
 	// endpointsChanges and serviceChanges contains all changes to windowsEndpoint and

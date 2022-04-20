@@ -157,8 +157,8 @@ func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 				refCount:        nil, // TODO
 				providerAddress: "TODO",
 				hns:             hns,
-				ready:           true, // TODO should always be ready if kpng notifies us, right?
-				serving:         true, // TODO same as above?
+				ready:           true,  // TODO should always be ready if kpng notifies us, right?
+				serving:         true,  // TODO same as above?
 				terminating:     false, // TODO opposite of above?
 			}
 			svcInfo.cleanupAllPolicies(we)
@@ -231,8 +231,8 @@ func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 				refCount:        nil, // TODO
 				providerAddress: "TODO",
 				hns:             hns,
-				ready:           true, // TODO should always be ready if kpng notifies us, right?
-				serving:         true, // TODO same as above?
+				ready:           true,  // TODO should always be ready if kpng notifies us, right?
+				serving:         true,  // TODO same as above?
 				terminating:     false, // TODO opposite of above?
 			}
 			svcInfo.cleanupAllPolicies(we)

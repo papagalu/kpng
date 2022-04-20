@@ -170,6 +170,7 @@ func NewProxier(
 
 	isIPv6 := netutils.IsIPv6(nodeIP)
 	Proxier := &Proxier{
+		kpngEndpointCache:   newKpngEndpointCache(),
 		endPointsRefCount:   make(endPointsReferenceCountMap),
 		serviceMap:          make(ServiceMap),
 		endpointsMap:        make(EndpointsMap),

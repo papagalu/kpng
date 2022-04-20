@@ -12,7 +12,6 @@ import (
 
 	localnetv1 "sigs.k8s.io/kpng/api/localnetv1"
 
-
 	"k8s.io/klog/v2"
 )
 
@@ -89,12 +88,12 @@ func NewEndpointChangeTracker(hostname string, ipFamily v1.IPFamily, recorder ev
 // how to convert windowsEndpoint from a incoming ??? localvnet1 Endpoint ?
 func (ect *EndpointChangeTracker) EndpointUpdate(namespace, serviceName, key string, we *localnetv1.Endpoint) {
 	// func (ect *EndpointChangeTracker) EndpointUpdate(namespace, serviceName, key string,  we *windowsEndpoint) {
-	namespacedName := types.NamespacedName{ Name: serviceName, Namespace: namespace }
+	namespacedName := types.NamespacedName{Name: serviceName, Namespace: namespace}
 	EndpointChangesTotal.Inc()
 
-	// xxxx 2 -> recieve a kpng endpoint and store it 
+	// xxxx 2 -> recieve a kpng endpoint and store it
 
-	// how to convert endpoint to a windowsEndpoint (we) ??? 
+	// how to convert endpoint to a windowsEndpoint (we) ???
 	ect.endpointsCache.updatePending(namespacedName, key, we)
 }
 

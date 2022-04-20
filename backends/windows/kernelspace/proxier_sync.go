@@ -20,9 +20,6 @@ limitations under the License.
 package kernelspace
 
 import (
-	"encoding/json"
-	"github.com/pkg/errors"
-	"sigs.k8s.io/kpng/api/localnetv1"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -33,39 +30,8 @@ import (
 	netutils "k8s.io/utils/net"
 )
 
-///// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx BEGIN caching layer for windows Endpoints
-var kpngEndpoints map[string]*windowsEndpoint
-func init()  {
-	kpngEndpoints = map[string]*windowsEndpoint{}
-}
-
-func kpngStoreEndpoint(ep localnetv1.Endpoint, we *windowsEndpoint)   {
-	klog.V(0).InfoS("Serializing ep and searching hnsIDs for it... %v %v", ep, we)
-	bytes, err := json.Marshal(ep)
-	if err != nil {
-		klog.Infof("Error: %s", err)
-		return
-	}
-	kpngEndpoints[string(bytes)] = we
-}
-
-// important function that services the ep := epInfo code... we need to look up the corresponding
-// hns endpoint when that happens.
-func kpngFindEndpoint(ep *localnetv1.Endpoint) (*windowsEndpoint, bool) {
-	if len(kpngEndpoints) == 0 {
-		return nil, false
-	}
-// TODO 	b, err := json.Marshal(ep) and look up that string...
-	for k,v := range kpngEndpoints {
-		klog.V(0).InfoS("kpngFindEndpoint, just returning it will figure out hashing later... %v %v", k, v)
-		return v, true
-	}
-	return nil, false
-}
-//// xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
 // Sync is called to synchronize the Proxier state to hns as soon as possible.
-func (Proxier *Proxier) Sync() {
+func (proxier *Proxier) Sync() {
 	//	if Proxier.healthzServer != nil {
 	//		Proxier.healthzServer.QueuedUpdate()
 	//	}
@@ -74,32 +40,32 @@ func (Proxier *Proxier) Sync() {
 	// metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
 
 	klog.V(0).InfoS("proxier_sync.Sync ->")
-	Proxier.syncRunner.Run()
+	proxier.syncRunner.Run()
 }
 
 // SyncLoop runs periodic work.  This is expected to run as a goroutine or as the main loop of the app.  It does not return.
-func (Proxier *Proxier) SyncLoop() {
+func (proxier *Proxier) SyncLoop() {
 	// Update healthz timestamp at beginning in case Sync() never succeeds.
-	//	if Proxier.healthzServer != nil {
-	//		Proxier.healthzServer.Updated()
+	//	if proxier.healthzServer != nil {
+	//		proxier.healthzServer.Updated()
 	//	}
 	// synthesize "last change queued" time as the informers are syncing.
 	//	metrics.SyncProxyRulesLastQueuedTimestamp.SetToCurrentTime()
-	Proxier.syncRunner.Loop(wait.NeverStop)
+	proxier.syncRunner.Loop(wait.NeverStop)
 }
 
-func (Proxier *Proxier) isInitialized() bool {
-	return atomic.LoadInt32(&Proxier.initialized) > 0
+func (proxier *Proxier) isInitialized() bool {
+	return atomic.LoadInt32(&proxier.initialized) > 0
 }
 
-func (Proxier *Proxier) cleanupAllPolicies() {
-	for svcName, svc := range Proxier.serviceMap {
+func (proxier *Proxier) cleanupAllPolicies() {
+	for svcName, svc := range proxier.serviceMap {
 		svcInfo, ok := svc.(*serviceInfo)
 		if !ok {
 			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
 			continue
 		}
-		endpoints := Proxier.endpointsMap[svcName.NamespacedName]
+		endpoints := proxier.endpointsMap[svcName.NamespacedName]
 		for _, e := range *endpoints {
 			hns, _ := newHostNetworkService()
 			we := &windowsEndpoint{
@@ -111,8 +77,8 @@ func (Proxier *Proxier) cleanupAllPolicies() {
 				refCount:        nil, // TODO
 				providerAddress: "TODO",
 				hns:             hns,
-				ready:           true, // TODO should always be ready if kpng notifies us, right?
-				serving:         true, // TODO same as above?
+				ready:           true,  // TODO should always be ready if kpng notifies us, right?
+				serving:         true,  // TODO same as above?
 				terminating:     false, // TODO opposite of above?
 			}
 			svcInfo.cleanupAllPolicies(we)
@@ -120,19 +86,15 @@ func (Proxier *Proxier) cleanupAllPolicies() {
 	}
 }
 
-func kpngGetHNS(endpoint *windowsEndpoint) string {
-	panic(any(errors.Errorf("TODO -- unimplemented placeholder")))
-}
-
 // This is where all of the hns save/restore calls happen.
 // assumes Proxier.mu is held
-func (Proxier *Proxier) syncProxyRules() {
+func (proxier *Proxier) syncProxyRules() {
 
-	Proxier.mu.Lock()
-	defer Proxier.mu.Unlock()
+	proxier.mu.Lock()
+	defer proxier.mu.Unlock()
 
 	// don't sync rules till we've received services and windowsEndpoint
-	if !Proxier.isInitialized() {
+	if !proxier.isInitialized() {
 		klog.V(2).InfoS("Not syncing hns until Services and Endpoints have been received from master")
 		return
 	}
@@ -145,16 +107,16 @@ func (Proxier *Proxier) syncProxyRules() {
 		klog.V(4).InfoS("Syncing proxy rules complete", "elapsed", time.Since(start))
 	}()
 
-	hnsNetworkName := Proxier.network.name
-	hns := Proxier.hns
+	hnsNetworkName := proxier.network.name
+	hns := proxier.hns
 
-	prevNetworkID := Proxier.network.id
+	prevNetworkID := proxier.network.id
 	updatedNetwork, err := hns.getNetworkByName(hnsNetworkName)
 	if updatedNetwork == nil || updatedNetwork.id != prevNetworkID || isNetworkNotFoundError(err) {
 		klog.InfoS("The HNS network is not present or has changed since the last sync, please check the CNI deployment", "hnsNetworkName", hnsNetworkName)
-		Proxier.cleanupAllPolicies()
+		proxier.cleanupAllPolicies()
 		if updatedNetwork != nil {
-			Proxier.network = *updatedNetwork
+			proxier.network = *updatedNetwork
 		}
 		return
 	}
@@ -162,22 +124,22 @@ func (Proxier *Proxier) syncProxyRules() {
 	// We assume that if this was called, we really want to sync them,
 	// even if nothing changed in the meantime. In other words, callers are
 	// responsible for detecting no-op changes and not calling this function.
-	serviceUpdateResult := Proxier.serviceMap.Update(Proxier.serviceChanges)
-	endpointUpdateResult := Proxier.endpointsMap.Update(Proxier.endpointsChanges)
+	serviceUpdateResult := proxier.serviceMap.Update(proxier.serviceChanges)
+	endpointUpdateResult := proxier.endpointsMap.Update(proxier.endpointsChanges)
 
 	staleServices := serviceUpdateResult.UDPStaleClusterIP
 	// merge stale services gathered from updateEndpointsMap
 	for _, svcPortName := range endpointUpdateResult.StaleServiceNames {
-		if svcInfo, ok := Proxier.serviceMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
+		if svcInfo, ok := proxier.serviceMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
 			klog.V(2).InfoS("Stale udp service", "servicePortName", svcPortName, "clusterIP", svcInfo.ClusterIP())
 			staleServices.Insert(svcInfo.ClusterIP().String())
 		}
 	}
 
-	if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
-		existingSourceVip, err := hns.getEndpointByIpAddress(Proxier.sourceVip, hnsNetworkName)
+	if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
+		existingSourceVip, err := hns.getEndpointByIpAddress(proxier.sourceVip, hnsNetworkName)
 		if existingSourceVip == nil {
-			_, err = newSourceVIP(hns, hnsNetworkName, Proxier.sourceVip, Proxier.hostMac, Proxier.nodeIP.String())
+			_, err = newSourceVIP(hns, hnsNetworkName, proxier.sourceVip, proxier.hostMac, proxier.nodeIP.String())
 		}
 		if err != nil {
 			klog.ErrorS(err, "Source Vip endpoint creation failed")
@@ -188,7 +150,7 @@ func (Proxier *Proxier) syncProxyRules() {
 	klog.V(3).InfoS("Syncing Policies")
 
 	// Program HNS by adding corresponding policies for each service.
-	for svcName, svc := range Proxier.serviceMap {
+	for svcName, svc := range proxier.serviceMap {
 		svcInfo, ok := svc.(*serviceInfo)
 		if !ok {
 			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
@@ -200,15 +162,15 @@ func (Proxier *Proxier) syncProxyRules() {
 			continue
 		}
 
-		if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
+		if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
 			serviceVipEndpoint, _ := hns.getEndpointByIpAddress(svcInfo.ClusterIP().String(), hnsNetworkName)
 			if serviceVipEndpoint == nil {
 				klog.V(4).InfoS("No existing remote endpoint", "IP", svcInfo.ClusterIP())
 				hnsEndpoint := &windowsEndpoint{
 					ip:              svcInfo.ClusterIP().String(),
 					isLocal:         false,
-					macAddress:      Proxier.hostMac,
-					providerAddress: Proxier.nodeIP.String(),
+					macAddress:      proxier.hostMac,
+					providerAddress: proxier.nodeIP.String(),
 				}
 
 				newHnsEndpoint, err := hns.createEndpoint(hnsEndpoint, hnsNetworkName)
@@ -216,14 +178,13 @@ func (Proxier *Proxier) syncProxyRules() {
 					klog.ErrorS(err, "Remote endpoint creation failed for service VIP")
 					continue
 				}
-				newHnsEndpoint.refCount = Proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
+				newHnsEndpoint.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
 				*newHnsEndpoint.refCount++
 				svcInfo.remoteEndpoint = newHnsEndpoint
 			}
 		}
 
-
-		/////////////////////////////////////////// Initialize a list of hnsEndpoints for this service..... 
+		/////////////////////////////////////////// Initialize a list of hnsEndpoints for this service.....
 		/////////////////////////////////////////// [we1 we2 we3 we4 .....]
 		/////////////////////////////////////////// 	->   AFTER we look up the endpoint we;kk update this list
 		var hnsEndpoints []windowsEndpoint
@@ -233,14 +194,14 @@ func (Proxier *Proxier) syncProxyRules() {
 		containsPublicIP := false
 		containsNodeIP := false
 
-		for _, epInfo := range *Proxier.endpointsMap[svcName.NamespacedName] {
+		for _, epInfo := range *proxier.endpointsMap[svcName.NamespacedName] {
 
 			// !!!!!!!!!!!!!!!!
 			// ep must be an instance of "windowsEndpoint..."
 			// it is an localvnet1.Endpoint...
 			//			ep, ok := epInfo.(*windowsEndpoint)
 			// !!!!!!!!!!!!!!!!
-			foundWindowsEndpoint, ok := kpngFindEndpoint(epInfo)
+			foundWindowsEndpoint, ok := proxier.kpngEndpointCache.findEndpoint(epInfo)
 			if !ok {
 				klog.ErrorS(nil, "Failed to recover a windows sEndpoint... skippingg, maybe no endpoints for this svc %v %v", "serviceName", svcName)
 				continue
@@ -252,7 +213,7 @@ func (Proxier *Proxier) syncProxyRules() {
 			//}
 
 			var newHnsEndpoint *windowsEndpoint
-			hnsNetworkName := Proxier.network.name
+			hnsNetworkName := proxier.network.name
 			var err error
 
 			// targetPort is zero if it is specified as a name in port.TargetPort, so the real port should be got from windowsEndpoint.
@@ -264,18 +225,17 @@ func (Proxier *Proxier) syncProxyRules() {
 				//svcInfo.targetPort = int(ep.port)
 			}
 
-
-////////////////////////////////////////////// Now we look up the hnsID 
-////////////////////////////////////////////// for the endpoint and 
-////////////////////////////////////////////// we use that to write the "newHnsEndpoint" that we will put in the 
-/////////////////////////////////////////////// ARRAY of HNS Endpoints later...
+			// Now we look up the hnsID
+			// for the endpoint and
+			// we use that to write the "newHnsEndpoint" that we will put in the
+			/// ARRAY of HNS Endpoints later...
 
 			if len(foundWindowsEndpoint.hnsID) > 0 {
 				// new function
 				hnsID := kpngGetHNS(foundWindowsEndpoint)
 				klog.InfoS("finished getting nhsID hnsID %v", hnsID)
 
-				newHnsEndpoint, err = hns.getEndpointByID( foundWindowsEndpoint.hnsID )
+				newHnsEndpoint, err = hns.getEndpointByID(foundWindowsEndpoint.hnsID)
 			}
 
 			if newHnsEndpoint == nil {
@@ -290,27 +250,27 @@ func (Proxier *Proxier) syncProxyRules() {
 					continue
 				}
 
-				if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
-					klog.InfoS("Updating network to check for new remote subnet policies", "networkName", Proxier.network.name)
-					networkName := Proxier.network.name
+				if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
+					klog.InfoS("Updating network to check for new remote subnet policies", "networkName", proxier.network.name)
+					networkName := proxier.network.name
 					updatedNetwork, err := hns.getNetworkByName(networkName)
 					if err != nil {
 						klog.ErrorS(err, "Unable to find HNS Network specified, please check network name and CNI deployment", "hnsNetworkName", hnsNetworkName)
-						Proxier.cleanupAllPolicies()
+						proxier.cleanupAllPolicies()
 						return
 					}
-					Proxier.network = *updatedNetwork
-					providerAddress := Proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
+					proxier.network = *updatedNetwork
+					providerAddress := proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
 
 					if len(providerAddress) == 0 {
 						klog.InfoS("Could not find provider address, assuming it is a public IP", "IP", foundWindowsEndpoint.IP())
-						providerAddress = Proxier.nodeIP.String()
+						providerAddress = proxier.nodeIP.String()
 					}
 
-					hnsEndpoint := &windowsEndpoint {
-						ip: foundWindowsEndpoint.ip,
-						isLocal:	false,
-						macAddress:	conjureMac("02-11", netutils.ParseIPSloppy(foundWindowsEndpoint.ip)),
+					hnsEndpoint := &windowsEndpoint{
+						ip:              foundWindowsEndpoint.ip,
+						isLocal:         false,
+						macAddress:      conjureMac("02-11", netutils.ParseIPSloppy(foundWindowsEndpoint.ip)),
 						providerAddress: providerAddress,
 					}
 					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
@@ -320,15 +280,15 @@ func (Proxier *Proxier) syncProxyRules() {
 					}
 				} else {
 					hnsEndpoint := &windowsEndpoint{
-						ip: foundWindowsEndpoint.ip,
-						isLocal: false,
+						ip:         foundWindowsEndpoint.ip,
+						isLocal:    false,
 						macAddress: foundWindowsEndpoint.macAddress,
 					}
 
 					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
 					if err != nil {
-						   klog.ErrorS(err, "Remote endpoint creation failed")
-						   continue
+						klog.ErrorS(err, "Remote endpoint creation failed")
+						continue
 					}
 				}
 			}
@@ -344,8 +304,8 @@ func (Proxier *Proxier) syncProxyRules() {
 			// a) Endpoints are any IP's outside the cluster ==> Choose NodeIP as the SourceVIP
 			// b) Endpoints are IP addresses of a remote node => Choose NodeIP as the SourceVIP
 			// c) Everything else (Local POD's, Remote POD's, Node IP of current node) ==> Choose the configured SourceVIP
-			if strings.EqualFold(Proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !foundWindowsEndpoint.GetIsLocal() {
-				providerAddress := Proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
+			if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !foundWindowsEndpoint.GetIsLocal() {
+				providerAddress := proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
 
 				isNodeIP := foundWindowsEndpoint.IP() == providerAddress
 				isPublicIP := len(providerAddress) == 0
@@ -360,11 +320,11 @@ func (Proxier *Proxier) syncProxyRules() {
 
 			hnsEndpoints = append(hnsEndpoints, *newHnsEndpoint)
 			if newHnsEndpoint.GetIsLocal() {
-				   hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
+				hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
 			} else {
-					// We only share the refCounts for remote windowsEndpoint
-					foundWindowsEndpoint.refCount = Proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
-					*foundWindowsEndpoint.refCount++
+				// We only share the refCounts for remote windowsEndpoint
+				foundWindowsEndpoint.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
+				*foundWindowsEndpoint.refCount++
 			}
 			foundWindowsEndpoint.hnsID = newHnsEndpoint.hnsID
 			klog.V(3).InfoS("Endpoint resource found and added to the hnsEndpoints array", "windowsEndpoint", foundWindowsEndpoint)
@@ -387,19 +347,19 @@ func (Proxier *Proxier) syncProxyRules() {
 
 		klog.V(4).InfoS("Trying to apply Policies for service", "serviceInfo", svcInfo)
 		var hnsLoadBalancer *loadBalancerInfo
-		var sourceVip = Proxier.sourceVip
+		var sourceVip = proxier.sourceVip
 		if containsPublicIP || containsNodeIP {
-			sourceVip = Proxier.nodeIP.String()
+			sourceVip = proxier.nodeIP.String()
 		}
 
 		sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
-		if sessionAffinityClientIP && !Proxier.supportedFeatures.SessionAffinity {
+		if sessionAffinityClientIP && !proxier.supportedFeatures.SessionAffinity {
 			klog.InfoS("Session Affinity is not supported on this version of Windows")
 		}
 
 		hnsLoadBalancer, err := hns.getLoadBalancer(
 			hnsEndpoints,
-			loadBalancerFlags{isDSR: Proxier.isDSR, isIPv6: Proxier.isIPv6Mode, sessionAffinity: sessionAffinityClientIP},
+			loadBalancerFlags{isDSR: proxier.isDSR, isIPv6: proxier.isIPv6Mode, sessionAffinity: sessionAffinityClientIP},
 			sourceVip,
 			svcInfo.ClusterIP().String(),
 			Enum(svcInfo.Protocol()),
@@ -426,7 +386,7 @@ func (Proxier *Proxier) syncProxyRules() {
 			if len(nodePortEndpoints) > 0 {
 				hnsLoadBalancer, err := hns.getLoadBalancer(
 					nodePortEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, localRoutedVIP: true, sessionAffinity: sessionAffinityClientIP, isIPv6: Proxier.isIPv6Mode},
+					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, localRoutedVIP: true, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
 					sourceVip,
 					"",
 					Enum(svcInfo.Protocol()),
@@ -443,7 +403,7 @@ func (Proxier *Proxier) syncProxyRules() {
 			} else {
 				klog.V(3).InfoS("Skipped creating Hns LoadBalancer for nodePort resources", "clusterIP", svcInfo.ClusterIP(), "nodeport", svcInfo.NodePort(), "hnsID", hnsLoadBalancer.hnsID)
 			}
-	     }
+		}
 
 		// Create a Load Balancer Policy for each external IP
 		for _, externalIP := range svcInfo.externalIPs {
@@ -457,7 +417,7 @@ func (Proxier *Proxier) syncProxyRules() {
 				// Try loading existing policies, if already available
 				hnsLoadBalancer, err = hns.getLoadBalancer(
 					externalIPEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, sessionAffinity: sessionAffinityClientIP, isIPv6: Proxier.isIPv6Mode},
+					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
 					sourceVip,
 					externalIP.ip,
 					Enum(svcInfo.Protocol()),
@@ -485,7 +445,7 @@ func (Proxier *Proxier) syncProxyRules() {
 			if len(lbIngressEndpoints) > 0 {
 				hnsLoadBalancer, err := hns.getLoadBalancer(
 					lbIngressEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.preserveDIP || svcInfo.localTrafficDSR, useMUX: svcInfo.preserveDIP, preserveDIP: svcInfo.preserveDIP, sessionAffinity: sessionAffinityClientIP, isIPv6: Proxier.isIPv6Mode},
+					loadBalancerFlags{isDSR: svcInfo.preserveDIP || svcInfo.localTrafficDSR, useMUX: svcInfo.preserveDIP, preserveDIP: svcInfo.preserveDIP, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
 					sourceVip,
 					lbIngressIP.ip,
 					Enum(svcInfo.Protocol()),
@@ -509,18 +469,18 @@ func (Proxier *Proxier) syncProxyRules() {
 
 	// TODO Jay:avoiding pkg/proxy imports... Commented out more healthServer stuff... going to kill it or keep it ?
 
-	//	if Proxier.healthzServer != nil {
-	//		Proxier.healthzServer.Updated()
+	//	if proxier.healthzServer != nil {
+	//		proxier.healthzServer.Updated()
 	//	}
 	//metrics.SyncProxyRulesLastTimestamp.SetToCurrentTime()
 
 	// Update service healthchecks.  The windowsEndpoint list might include services that are
 	// not "OnlyLocal", but the services list will not, and the serviceHealthServer
 	// will just drop those windowsEndpoint.
-	//	if err := Proxier.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
+	//	if err := proxier.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
 	//		klog.ErrorS(err, "Error syncing healthcheck services")
 	//	}
-	//	if err := Proxier.serviceHealthServer.SyncEndpoints(endpointUpdateResult.HCEndpointsLocalIPSize); err != nil {
+	//	if err := proxier.serviceHealthServer.SyncEndpoints(endpointUpdateResult.HCEndpointsLocalIPSize); err != nil {
 	//		klog.ErrorS(err, "Error syncing healthcheck windowsEndpoint")
 	//	}
 
@@ -532,9 +492,9 @@ func (Proxier *Proxier) syncProxyRules() {
 	}
 
 	// remove stale endpoint refcount entries
-	for hnsID, referenceCount := range Proxier.endPointsRefCount {
+	for hnsID, referenceCount := range proxier.endPointsRefCount {
 		if *referenceCount <= 0 {
-			delete(Proxier.endPointsRefCount, hnsID)
+			delete(proxier.endPointsRefCount, hnsID)
 		}
 	}
 }
