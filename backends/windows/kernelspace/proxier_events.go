@@ -13,7 +13,7 @@ import (
 
 // OnEndpointsAdd is called whenever creation of new windowsEndpoint object
 // is observed.
-func (Proxier *Proxier) OnEndpointsAdd(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
+func (proxier *Proxier) OnEndpointsAdd(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
 
 // OnEndpointsUpdate is called whenever modification of an existing
 // windowsEndpoint object is observed.
@@ -21,30 +21,30 @@ func (proxier *Proxier) OnEndpointsUpdate(oldEndpoints, endpoints *localnetv1.En
 
 // OnEndpointsDelete is called whenever deletion of an existing windowsEndpoint
 // object is observed. Service object
-func (Proxier *Proxier) OnEndpointsDelete(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
+func (proxier *Proxier) OnEndpointsDelete(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
 
 // OnEndpointsSynced is called once all the initial event handlers were
 // called and the state is fully propagated to local cache.
-func (Proxier *Proxier) OnEndpointsSynced() {}
+func (proxier *Proxier) OnEndpointsSynced() {}
 
 // TODO Fix EndpointSlices logic !!!!!!!!!!!!! JAY
-func (Proxier *Proxier) OnEndpointSliceAdd(endpointSlice *discovery.EndpointSlice) {
+func (proxier *Proxier) OnEndpointSliceAdd(endpointSlice *discovery.EndpointSlice) {
 	//	if Proxier.endpointsChanges.EndpointSliceUpdate(endpointSlice, false) && Proxier.isInitialized() {
 	//		Proxier.Sync()
 	//	}
 }
-func (Proxier *Proxier) OnEndpointSliceUpdate(_, endpointSlice *discovery.EndpointSlice) {
+func (proxier *Proxier) OnEndpointSliceUpdate(_, endpointSlice *discovery.EndpointSlice) {
 	//	if Proxier.endpointsChanges.EndpointSliceUpdate(endpointSlice, false) && Proxier.isInitialized() {
 	//		Proxier.Sync()
 	//	}
 }
-func (Proxier *Proxier) OnEndpointSliceDelete(endpointSlice *discovery.EndpointSlice) {
+func (proxier *Proxier) OnEndpointSliceDelete(endpointSlice *discovery.EndpointSlice) {
 	//	if Proxier.endpointsChanges.EndpointSliceUpdate(endpointSlice, true) && Proxier.isInitialized() {
 	//		proxier.Sync()
 	//	}
 }
 
-func (Proxier *Proxier) BackendDeleteService(
+func (proxier *Proxier) BackendDeleteService(
 	namespace string,
 	name string) {
 
@@ -53,22 +53,22 @@ func (Proxier *Proxier) BackendDeleteService(
 			Namespace: namespace,
 			Name:      name}}
 
-	_, exists := Proxier.serviceMap[svcPortName]
+	_, exists := proxier.serviceMap[svcPortName]
 	if exists {
-		Proxier.serviceMap[svcPortName] = nil
+		proxier.serviceMap[svcPortName] = nil
 	}
 }
 
 // OnEndpointSlicesSynced is called once all the initial event handlers were
 // called and the state is fully propagated to local cache.
-func (Proxier *Proxier) OnEndpointSlicesSynced() {
-	Proxier.mu.Lock()
-	Proxier.endpointSlicesSynced = true
-	Proxier.setInitialized(Proxier.servicesSynced)
-	Proxier.mu.Unlock()
+func (proxier *Proxier) OnEndpointSlicesSynced() {
+	proxier.mu.Lock()
+	proxier.endpointSlicesSynced = true
+	proxier.setInitialized(proxier.servicesSynced)
+	proxier.mu.Unlock()
 
 	// Sync unconditionally - this is called once per lifetime.
-	Proxier.syncProxyRules()
+	proxier.syncProxyRules()
 }
 
 // OnServiceAdd is called whenever creation of new service object
@@ -91,17 +91,17 @@ func (proxier *Proxier) OnServiceDelete(service *localnetv1.Service) {
 
 // OnServiceSynced is called once all the initial event handlers were
 // called and the state is fully propagated to local cache.
-func (Proxier *Proxier) OnServiceSynced() {
-	Proxier.mu.Lock()
-	Proxier.servicesSynced = true
-	Proxier.setInitialized(Proxier.endpointSlicesSynced)
-	Proxier.mu.Unlock()
+func (proxier *Proxier) OnServiceSynced() {
+	proxier.mu.Lock()
+	proxier.servicesSynced = true
+	proxier.setInitialized(proxier.endpointSlicesSynced)
+	proxier.mu.Unlock()
 
 	// Sync unconditionally - this is called once per lifetime.
-	Proxier.syncProxyRules()
+	proxier.syncProxyRules()
 }
 
-func (Proxier *Proxier) endpointsMapChange(oldEndpointsMap, newEndpointsMap EndpointsMap) {
+func (proxier *Proxier) endpointsMapChange(oldEndpointsMap, newEndpointsMap EndpointsMap) {
 	//read the old windowsEndpoint...
 
 	// iterate through this cache.. map[types.NamespacedName]*endpointsInfoByName
@@ -111,7 +111,7 @@ func (Proxier *Proxier) endpointsMapChange(oldEndpointsMap, newEndpointsMap Endp
 			// Port:
 			// Protocol:
 		}
-		Proxier.onEndpointsMapChange(spn)
+		proxier.onEndpointsMapChange(spn)
 	}
 
 	//read the new windowsEndpoint...
@@ -121,13 +121,13 @@ func (Proxier *Proxier) endpointsMapChange(oldEndpointsMap, newEndpointsMap Endp
 			// Port:
 			// Protocol:
 		}
-		Proxier.onEndpointsMapChange(spn)
+		proxier.onEndpointsMapChange(spn)
 	}
 }
 
-func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
+func (proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 
-	svc, exists := Proxier.serviceMap[*svcPortName]
+	svc, exists := proxier.serviceMap[*svcPortName]
 
 	if exists {
 		svcInfo, ok := svc.(*serviceInfo)
@@ -144,8 +144,8 @@ func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 			// Protocol:
 		}
 
-		// e := Proxier.endpointsMap[spn.NamespacedName]
-		endpoints := Proxier.endpointsMap[spn.NamespacedName]
+		// e := proxier.endpointsMap[spn.NamespacedName]
+		endpoints := proxier.endpointsMap[spn.NamespacedName]
 		for _, e := range *endpoints {
 			hns, _ := newHostNetworkService()
 			we := &windowsEndpoint{
@@ -169,7 +169,7 @@ func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 		// Cleanup Endpoints references
 
 		// TODO: Jay fix endpoint cleanup logic : what should happen here? look back in original windows
-		//epInfos, exists := Proxier.endpointsMap[svcPortName.NamespacedName]
+		//epInfos, exists := proxier.endpointsMap[svcPortName.NamespacedName]
 		// proxy .
 		// if exists {
 		// Cleanup Endpoints references
@@ -180,20 +180,20 @@ func (Proxier *Proxier) onEndpointsMapChange(svcPortName *ServicePortName) {
 	}
 }
 
-func (Proxier *Proxier) serviceMapChange(previous, current ServiceMap) {
+func (proxier *Proxier) serviceMapChange(previous, current ServiceMap) {
 	for svcPortName := range current {
-		Proxier.onServiceMapChange(&svcPortName)
+		proxier.onServiceMapChange(&svcPortName)
 	}
 
 	for svcPortName := range previous {
 		if _, ok := current[svcPortName]; ok {
 			continue
 		}
-		Proxier.onServiceMapChange(&svcPortName)
+		proxier.onServiceMapChange(&svcPortName)
 	}
 }
 
-func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
+func (proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 
 	// the ServicePort interface is used to store serviceInfo objects...
 	spn := &ServicePortName{
@@ -201,7 +201,7 @@ func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 		// Port:
 		// Protocol:
 	}
-	svc, exists := Proxier.serviceMap[*spn]
+	svc, exists := proxier.serviceMap[*spn]
 
 	if exists {
 		// The generic ServicePort interface casts down to a specific windows implementation here... "serviceInfo"...
@@ -219,7 +219,7 @@ func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 			"port", svcInfo.Port(),
 			"protocol", svcInfo.Protocol(),
 		)
-		endpoints := Proxier.endpointsMap[spn.NamespacedName]
+		endpoints := proxier.endpointsMap[spn.NamespacedName]
 		for _, e := range *endpoints {
 			hns, _ := newHostNetworkService()
 			we := &windowsEndpoint{
@@ -242,7 +242,7 @@ func (Proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 }
 
 // returns a new proxy.Endpoint which abstracts a endpointsInfo
-func (Proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) Endpoint {
+func (proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) *windowsEndpoint {
 	portNumber, err := baseInfo.Port()
 
 	if err != nil {
@@ -256,7 +256,7 @@ func (Proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) Endpoint {
 		macAddress: conjureMac("02-11", netutils.ParseIPSloppy(baseInfo.IP())),
 		refCount:   new(uint16),
 		hnsID:      "",
-		hns:        Proxier.hns,
+		hns:        proxier.hns,
 
 		ready:       baseInfo.Ready,
 		serving:     baseInfo.Serving,
@@ -267,7 +267,7 @@ func (Proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) Endpoint {
 }
 
 // returns a new proxy.ServicePort which abstracts a serviceInfo
-func (Proxier *Proxier) newServiceInfo(port *localnetv1.PortMapping, service *localnetv1.Service, baseInfo *BaseServiceInfo) ServicePort {
+func (proxier *Proxier) newServiceInfo(port *localnetv1.PortMapping, service *localnetv1.Service, baseInfo *BaseServiceInfo) ServicePort {
 	info := &serviceInfo{BaseServiceInfo: baseInfo}
 	preserveDIP := service.Annotations["preserve-destination"] == "true"
 
@@ -289,7 +289,7 @@ func (Proxier *Proxier) newServiceInfo(port *localnetv1.PortMapping, service *lo
 
 	info.preserveDIP = preserveDIP
 	info.targetPort = targetPort
-	info.hns = Proxier.hns
+	info.hns = proxier.hns
 	info.localTrafficDSR = localTrafficDSR
 
 	// TODO Jay: Adding both v4 and v6 ips.  no idea if this breaks dualstack or not.
@@ -311,10 +311,10 @@ func (Proxier *Proxier) newServiceInfo(port *localnetv1.PortMapping, service *lo
 	return info
 }
 
-func (Proxier *Proxier) setInitialized(value bool) {
+func (proxier *Proxier) setInitialized(value bool) {
 	var initialized int32
 	if value {
 		initialized = 1
 	}
-	atomic.StoreInt32(&Proxier.initialized, initialized)
+	atomic.StoreInt32(&proxier.initialized, initialized)
 }

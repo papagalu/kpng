@@ -21,7 +21,6 @@ package kernelspace
 
 import (
 	"fmt"
-
 	"github.com/Microsoft/hcsshim/hcn"
 	v1 "k8s.io/api/core/v1"
 	apiutil "k8s.io/apimachinery/pkg/util/net"

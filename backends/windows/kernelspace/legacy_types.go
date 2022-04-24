@@ -104,7 +104,7 @@ type Endpoint interface {
 	IsTerminating() bool
 	// GetTopology returns the topology information of the endpoint.
 	GetTopology() map[string]string
-	// GetZoneHint returns the zone hint for the endpoint. This is based on
+	// GetZoneHints returns the zone hint for the endpoint. This is based on
 	// endpoint.hints.forZones[0].name in the EndpointSlice API.
 	GetZoneHints() sets.String
 	// IP returns IP part of the endpoint.

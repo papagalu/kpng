@@ -184,9 +184,9 @@ func (proxier *Proxier) syncProxyRules() {
 			}
 		}
 
-		/////////////////////////////////////////// Initialize a list of hnsEndpoints for this service.....
-		/////////////////////////////////////////// [we1 we2 we3 we4 .....]
-		/////////////////////////////////////////// 	->   AFTER we look up the endpoint we;kk update this list
+		/// Initialize a list of hnsEndpoints for this service.....
+		/// [we1 we2 we3 we4 .....]
+		/// 	->   AFTER we look up the endpoint we;kk update this list
 		var hnsEndpoints []windowsEndpoint
 		var hnsLocalEndpoints []windowsEndpoint
 		klog.V(4).InfoS("Applying Policy", "serviceInfo", svcName)
