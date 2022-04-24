@@ -168,7 +168,7 @@ func NewProxier(
 	}
 
 	isIPv6 := netutils.IsIPv6(nodeIP)
-	Proxier := &Proxier{
+	myProxier := &Proxier{
 		kpngEndpointCache:   newKpngEndpointCache(),
 		endPointsRefCount:   make(endPointsReferenceCountMap),
 		serviceMap:          make(ServiceMap),
@@ -206,15 +206,15 @@ func NewProxier(
 		)
 	- vnet1 portmapping, vnet1 service, BaseServiceInfo
 	*/
-	serviceChanges := NewServiceChangeTracker(Proxier.newServiceInfo, ipFamily, recorder)
+	serviceChanges := NewServiceChangeTracker(myProxier.newServiceInfo, ipFamily, recorder)
 	endPointChangeTracker := NewEndpointChangeTracker(hostname, ipFamily, recorder)
-	Proxier.endpointsChanges = endPointChangeTracker
-	Proxier.serviceChanges = serviceChanges
+	myProxier.endpointsChanges = endPointChangeTracker
+	myProxier.serviceChanges = serviceChanges
 
 	burstSyncs := 2
 	klog.V(3).InfoS("Record sync param", "minSyncPeriod", minSyncPeriod, "syncPeriod", syncPeriod, "burstSyncs", burstSyncs)
-	Proxier.syncRunner = async.NewBoundedFrequencyRunner("sync-runner", Proxier.syncProxyRules, minSyncPeriod, syncPeriod, burstSyncs)
-	return Proxier, nil
+	myProxier.syncRunner = async.NewBoundedFrequencyRunner("sync-runner", myProxier.syncProxyRules, minSyncPeriod, syncPeriod, burstSyncs)
+	return myProxier, nil
 }
 
 /// BASE ENDPOINT INFO
