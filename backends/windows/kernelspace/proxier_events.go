@@ -1,6 +1,7 @@
 package kernelspace
 
 import (
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sync/atomic"
 
 	discovery "k8s.io/api/discovery/v1"
@@ -13,19 +14,51 @@ import (
 
 // OnEndpointsAdd is called whenever creation of new windowsEndpoint object
 // is observed.
-func (proxier *Proxier) OnEndpointsAdd(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
+func (proxier *Proxier) OnEndpointsAdd(ep *localnetv1.Endpoint, svc *localnetv1.Service) {
+	baseInfo := &BaseEndpointInfo{
+		Endpoint:    "TODO what is this supposed to be?",
+		IsLocal:     ep.Local,
+		ZoneHints:   map[string]sets.Empty{"TODO what is this?": {}},
+		Ready:       false, // TODO
+		Serving:     false, // TODO
+		Terminating: false, // TODO
+		NodeName:    ep.Hostname,
+		Zone:        "TODO what is this?",
+	}
+	we := proxier.newWindowsEndpointFromBaseEndpointInfo(baseInfo)
+	proxier.kpngEndpointCache.storeEndpoint(*ep, we)
+}
 
 // OnEndpointsUpdate is called whenever modification of an existing
 // windowsEndpoint object is observed.
-func (proxier *Proxier) OnEndpointsUpdate(oldEndpoints, endpoints *localnetv1.Endpoint) {}
+func (proxier *Proxier) OnEndpointsUpdate(oldEndpoints, endpoints *localnetv1.Endpoint) {
+	proxier.kpngEndpointCache.removeEndpoint(oldEndpoints)
+
+	baseInfo := &BaseEndpointInfo{
+		Endpoint:    "TODO what is this supposed to be?",
+		IsLocal:     endpoints.Local,
+		ZoneHints:   map[string]sets.Empty{"TODO what is this?": {}},
+		Ready:       false, // TODO
+		Serving:     false, // TODO
+		Terminating: false, // TODO
+		NodeName:    endpoints.Hostname,
+		Zone:        "TODO what is this?",
+	}
+	we := proxier.newWindowsEndpointFromBaseEndpointInfo(baseInfo)
+	proxier.kpngEndpointCache.storeEndpoint(*endpoints, we)
+}
 
 // OnEndpointsDelete is called whenever deletion of an existing windowsEndpoint
 // object is observed. Service object
-func (proxier *Proxier) OnEndpointsDelete(ep *localnetv1.Endpoint, svc *localnetv1.Service) {}
+func (proxier *Proxier) OnEndpointsDelete(ep *localnetv1.Endpoint, svc *localnetv1.Service) {
+	proxier.kpngEndpointCache.removeEndpoint(ep)
+}
 
 // OnEndpointsSynced is called once all the initial event handlers were
 // called and the state is fully propagated to local cache.
-func (proxier *Proxier) OnEndpointsSynced() {}
+func (proxier *Proxier) OnEndpointsSynced() {
+	// TODO
+}
 
 // TODO Fix EndpointSlices logic !!!!!!!!!!!!! JAY
 func (proxier *Proxier) OnEndpointSliceAdd(endpointSlice *discovery.EndpointSlice) {
@@ -44,19 +77,14 @@ func (proxier *Proxier) OnEndpointSliceDelete(endpointSlice *discovery.EndpointS
 	//	}
 }
 
-func (proxier *Proxier) BackendDeleteService(
-	namespace string,
-	name string) {
-
+func (proxier *Proxier) BackendDeleteService(namespace string, name string) {
 	svcPortName := ServicePortName{
 		NamespacedName: types.NamespacedName{
 			Namespace: namespace,
-			Name:      name}}
-
-	_, exists := proxier.serviceMap[svcPortName]
-	if exists {
-		proxier.serviceMap[svcPortName] = nil
+			Name:      name,
+		},
 	}
+	delete(proxier.serviceMap, svcPortName)
 }
 
 // OnEndpointSlicesSynced is called once all the initial event handlers were
@@ -194,7 +222,6 @@ func (proxier *Proxier) serviceMapChange(previous, current ServiceMap) {
 }
 
 func (proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
-
 	// the ServicePort interface is used to store serviceInfo objects...
 	spn := &ServicePortName{
 		NamespacedName: svcPortName.NamespacedName,
@@ -237,12 +264,10 @@ func (proxier *Proxier) onServiceMapChange(svcPortName *ServicePortName) {
 			}
 			svcInfo.cleanupAllPolicies(we)
 		}
-
 	}
 }
 
-// returns a new proxy.Endpoint which abstracts a endpointsInfo
-func (proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) *windowsEndpoint {
+func (proxier *Proxier) newWindowsEndpointFromBaseEndpointInfo(baseInfo *BaseEndpointInfo) *windowsEndpoint {
 	portNumber, err := baseInfo.Port()
 
 	if err != nil {
@@ -261,9 +286,16 @@ func (proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) *windowsEndp
 		ready:       baseInfo.Ready,
 		serving:     baseInfo.Serving,
 		terminating: baseInfo.Terminating,
+
+		baseInfo: baseInfo,
 	}
 
 	return info
+}
+
+// returns a new proxy.Endpoint which abstracts a endpointsInfo
+func (proxier *Proxier) newEndpointInfo(baseInfo *BaseEndpointInfo) Endpoint {
+	return proxier.newWindowsEndpointFromBaseEndpointInfo(baseInfo)
 }
 
 // returns a new proxy.ServicePort which abstracts a serviceInfo

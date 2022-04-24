@@ -42,6 +42,9 @@ type windowsEndpoint struct {
 	ready       bool
 	serving     bool
 	terminating bool
+
+	// TODO don't know if this is necessary
+	baseInfo *BaseEndpointInfo
 }
 
 // String is part of proxy.Endpoint interface.

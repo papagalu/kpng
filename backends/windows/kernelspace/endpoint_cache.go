@@ -34,6 +34,15 @@ func (k *kpngEndpointCache) findEndpoint(ep *localnetv1.Endpoint) (*windowsEndpo
 	return nil, false
 }
 
+func (k *kpngEndpointCache) removeEndpoint(ep *localnetv1.Endpoint) (*windowsEndpoint, bool) {
+	key := getEndpointKey(ep)
+	if value, ok := k.endpoints[key]; ok {
+		delete(k.endpoints, key)
+		return value, true
+	}
+	return nil, false
+}
+
 func getEndpointKey(endpoint *localnetv1.Endpoint) string {
 	klog.V(0).InfoS("Serializing endpoint to json: %v", endpoint)
 	bytes, err := json.Marshal(endpoint)
