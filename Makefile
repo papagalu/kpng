@@ -18,7 +18,7 @@ all: help
 
 # kpng build info
 VERSION=$(shell git describe --tags --always --long)
-LDFLAGS="-s -w -X main.version=$(VERSION)"
+LDFLAGS="-X main.version=$(VERSION)"
 ARCH="amd64"
 BUILD_DIR="kpng-bin"
 export PLATFORM=""

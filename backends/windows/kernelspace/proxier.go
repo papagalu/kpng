@@ -154,7 +154,7 @@ func NewProxier(
 			addresses, _ := inter.Addrs()
 			for _, addr := range addresses {
 				addrIP, _, _ := netutils.ParseCIDRSloppy(addr.String())
-				if addrIP.String() == nodeIP.String() {
+				if addrIP.String() == nodeIP.String() && inter.HardwareAddr != nil{
 					klog.V(2).InfoS("Record Host MAC address", "addr", inter.HardwareAddr)
 					hostMac = inter.HardwareAddr.String()
 				}
