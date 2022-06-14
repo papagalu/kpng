@@ -89,6 +89,7 @@ func (proxier *Proxier) cleanupAllPolicies() {
 // This is where all of the hns save/restore calls happen.
 // assumes Proxier.mu is held
 func (proxier *Proxier) syncProxyRules() {
+	klog.InfoS("start syncProxyRules")
 
 	proxier.mu.Lock()
 	defer proxier.mu.Unlock()

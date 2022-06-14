@@ -45,8 +45,9 @@ type Backend struct {
 
 var (
 	_             decoder.Interface = &Backend{}
-	proxier       Provider
-	proxierState  Proxier
+	//proxier       Provider
+	//proxierState  Proxier
+	proxier 	*Proxier
 	flag          = &pflag.FlagSet{}
 	minSyncPeriod time.Duration
 	syncPeriod    time.Duration
@@ -74,7 +75,7 @@ var (
 
 	clusterCIDR = flag.String(
 		"",
-		"0.0.0.0/0",
+		"100.244.0.0/24",
 		"cluster IPs CIDR")
 
 	// defaulting to the sig-windows-dev-tools value, should be 127.0.0.1?
@@ -107,18 +108,18 @@ func (s *Backend) Sink() localsink.Sink {
 }
 
 func (s *Backend) DeleteEndpoint(namespace, serviceName, key string) {
-	proxierState.serviceChanges.Delete(namespace, serviceName)
+	proxier.serviceChanges.Delete(namespace, serviceName)
 
 }
 
 func (s *Backend) SetService(svc *localnetv1.Service) {
 	klog.V(0).InfoS("SetService -> %v", svc)
-	proxierState.serviceChanges.Update(svc)
+	proxier.serviceChanges.Update(svc)
 
 }
 
 func (s *Backend) DeleteService(namespace, name string) {
-	proxierState.BackendDeleteService(namespace, name)
+	proxier.BackendDeleteService(namespace, name)
 }
 
 func (s *Backend) SetEndpoint(
@@ -127,8 +128,7 @@ func (s *Backend) SetEndpoint(
 	key string,
 	endpoint *localnetv1.Endpoint) {
 
-	proxierState.endpointsChanges.EndpointUpdate(namespace, serviceName, key, endpoint)
-	// proxierStaite.endpointChanges.Update( )
+	proxier.endpointsChanges.EndpointUpdate(namespace, serviceName, key, endpoint)
 }
 
 func (s *Backend) Reset() {
@@ -165,12 +165,15 @@ func (s *Backend) Setup() {
 
 	if err != nil {
 		klog.ErrorS(err, "Failed to create an instance of NewProxier")
+		panic("could not initialize proxier")
 	}
+	go proxier.SyncLoop()
 
 }
 
 func (s *Backend) Sync() {
 	klog.V(0).InfoS("backend.Sync()")
+	proxier.setInitialized(true)
 	proxier.Sync()
 }
 

@@ -124,7 +124,7 @@ func NewProxier(
 
 	// Why do we need VIPs?
 
-	var sourceVip string
+	//var sourceVip string
 	var hostMac string
 	if isOverlay(hnsNetworkInfo) {
 		if !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.WinOverlay) {
@@ -134,7 +134,6 @@ func NewProxier(
 		if err != nil {
 			return nil, err
 		}
-		// TODO: Add Back the flag
 		//sourceVip = config.SourceVip
 		//if len(sourceVip) == 0 {
 		//		return nil, fmt.Errorf("source-vip flag not set")
@@ -182,7 +181,7 @@ func NewProxier(
 		healthzServer:       healthzServer,
 		hns:                 hns,
 		network:             *hnsNetworkInfo,
-		sourceVip:           sourceVip,
+		sourceVip:           "100.244.1.2",
 		hostMac:             hostMac,
 		isDSR:               isDSR,
 		supportedFeatures:   supportedFeatures,
