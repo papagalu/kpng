@@ -34,10 +34,42 @@ import (
 
 	"net"
 	"time"
+	"os"
 
 	"k8s.io/kubernetes/pkg/util/async"
 	netutils "k8s.io/utils/net"
 )
+
+func newHostNetworkService() (HCNUtils, hcn.SupportedFeatures) {
+	var h HCNUtils
+	supportedFeatures := hcn.GetSupportedFeatures()
+	if supportedFeatures.Api.V2 {
+		h = hcnutils{&ihcn{}}
+	}
+
+	return h, supportedFeatures
+}
+
+func getNetworkName(hnsNetworkName string) (string, error) {
+	if len(hnsNetworkName) == 0 {
+		klog.V(3).InfoS("Flag --network-name not set, checking environment variable")
+		hnsNetworkName = os.Getenv("KUBE_NETWORK")
+		if len(hnsNetworkName) == 0 {
+			return "", fmt.Errorf("Environment variable KUBE_NETWORK and network-flag not initialized")
+		}
+	}
+	return hnsNetworkName, nil
+}
+
+func getNetworkInfo(hns HCNUtils, hnsNetworkName string) (*hnsNetworkInfo, error) {
+	hnsNetworkInfo, err := hns.getNetworkByName(hnsNetworkName)
+	for err != nil {
+		klog.ErrorS(err, "Unable to find HNS Network specified, please check network name and CNI deployment", "hnsNetworkName", hnsNetworkName)
+		time.Sleep(1 * time.Second)
+		hnsNetworkInfo, err = hns.getNetworkByName(hnsNetworkName)
+	}
+	return hnsNetworkInfo, err
+}
 
 // NewProxier returns a new Proxier
 func NewProxier(
@@ -167,9 +199,8 @@ func NewProxier(
 
 	isIPv6 := netutils.IsIPv6(nodeIP)
 	myProxier := &Proxier{
-		kpngEndpointCache:   newKpngEndpointCache(),
 		endPointsRefCount:   make(endPointsReferenceCountMap),
-		serviceMap:          make(ServiceMap),
+		serviceMap:          make(ServicesSnapshot),
 		endpointsMap:        make(EndpointsMap),
 		masqueradeAll:       masqueradeAll,
 		masqueradeMark:      masqueradeMark,

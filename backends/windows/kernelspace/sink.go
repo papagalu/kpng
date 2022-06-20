@@ -108,7 +108,7 @@ func (s *Backend) Sink() localsink.Sink {
 }
 
 func (s *Backend) DeleteEndpoint(namespace, serviceName, key string) {
-	proxier.serviceChanges.Delete(namespace, serviceName)
+	proxier.endpointsChanges.EndpointUpdate(namespace, serviceName, key, nil)
 
 }
 
@@ -119,7 +119,7 @@ func (s *Backend) SetService(svc *localnetv1.Service) {
 }
 
 func (s *Backend) DeleteService(namespace, name string) {
-	proxier.BackendDeleteService(namespace, name)
+	proxier.serviceChanges.Delete(namespace, name)
 }
 
 func (s *Backend) SetEndpoint(

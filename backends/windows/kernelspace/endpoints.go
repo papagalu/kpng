@@ -27,8 +27,8 @@ import (
 	"strconv"
 )
 
-// internal struct for windowsEndpoint information
-type windowsEndpoint struct {
+// internal struct for endpoints information
+type endpointsInfo struct {
 	ip              string
 	port            uint16
 	isLocal         bool
@@ -36,97 +36,92 @@ type windowsEndpoint struct {
 	hnsID           string
 	refCount        *uint16
 	providerAddress string
-	hns             HostNetworkService
+	hns             HCNUtils
+	name            string
 
 	// conditions
 	ready       bool
 	serving     bool
 	terminating bool
-
-	// TODO don't know if this is necessary
-	baseInfo *BaseEndpointInfo
 }
 
 // String is part of proxy.Endpoint interface.
-func (ep *windowsEndpoint) String() string {
-	return net.JoinHostPort(
-		ep.ip,
-		strconv.Itoa(int(ep.port)))
+func (info *endpointsInfo) String() string {
+	return net.JoinHostPort(info.ip, strconv.Itoa(int(info.port)))
 }
 
 // GetIsLocal is part of proxy.Endpoint interface.
-func (ep *windowsEndpoint) GetIsLocal() bool {
-	return ep.isLocal
+func (info *endpointsInfo) GetIsLocal() bool {
+	return info.isLocal
 }
 
 // IsReady returns true if an endpoint is ready and not terminating.
-func (ep *windowsEndpoint) IsReady() bool {
-	return ep.ready
+func (info *endpointsInfo) IsReady() bool {
+	return info.ready
 }
 
 // IsServing returns true if an endpoint is ready, regardless of it's terminating state.
-func (ep *windowsEndpoint) IsServing() bool {
-	return ep.serving
+func (info *endpointsInfo) IsServing() bool {
+	return info.serving
 }
 
 // IsTerminating returns true if an endpoint is terminating.
-func (ep *windowsEndpoint) IsTerminating() bool {
-	return ep.terminating
+func (info *endpointsInfo) IsTerminating() bool {
+	return info.terminating
 }
 
 // GetZoneHint returns the zone hint for the endpoint.
-func (ep *windowsEndpoint) GetZoneHints() sets.String {
+func (info *endpointsInfo) GetZoneHints() sets.String {
 	return sets.String{}
 }
 
 // IP returns just the IP part of the endpoint, it's a part of proxy.Endpoint interface.
-func (ep *windowsEndpoint) IP() string {
-	return ep.ip
+func (info *endpointsInfo) IP() string {
+	return info.ip
 }
 
 // Port returns just the Port part of the endpoint.
-func (ep *windowsEndpoint) Port() (int, error) {
-	return int(ep.port), nil
+func (info *endpointsInfo) Port() (int, error) {
+	return int(info.port), nil
 }
 
 // Equal is part of proxy.Endpoint interface.
-func (ep *windowsEndpoint) Equal(other Endpoint) bool {
-	return ep.String() == other.String() && ep.GetIsLocal() == other.GetIsLocal()
+func (info *endpointsInfo) Equal(other Endpoint) bool {
+	return info.String() == other.String() && info.GetIsLocal() == other.GetIsLocal()
 }
 
 // GetNodeName returns the NodeName for this endpoint.
-func (ep *windowsEndpoint) GetNodeName() string {
+func (info *endpointsInfo) GetNodeName() string {
 	return ""
 }
 
 // GetZone returns the Zone for this endpoint.
-func (ep *windowsEndpoint) GetZone() string {
+func (info *endpointsInfo) GetZone() string {
 	return ""
 }
 
-// TODO Jay imp topology logic mahybe in baseEndpointInfo or converge it w baseEndpointInfo
-func (ep *windowsEndpoint) GetTopology() map[string]string {
+func (info *endpointsInfo) GetTopology() map[string]string {
 	return map[string]string{}
 }
 
-func (ep *windowsEndpoint) Cleanup() {
-	klog.V(3).InfoS("Endpoint cleanup", "windowsEndpoint.Info", ep)
-	if !ep.GetIsLocal() && ep.refCount != nil {
-		*ep.refCount--
+func (info *endpointsInfo) Cleanup() {
+    klog.V(3).InfoS("Endpoint cleanup", "endpointsInfo", info)
+    if !info.GetIsLocal() && info.refCount != nil {
+        *info.refCount--
 
-		// Remove the remote hns endpoint, if no service is referring it
-		// Never delete a Local Endpoint. Local Endpoints are already created by other entities.
-		// Remove only remote windowsEndpoint created by this service
-		if *ep.refCount <= 0 && !ep.GetIsLocal() {
-			klog.V(4).InfoS("Removing windowsEndpoint, since no one is referencing it", "endpoint", ep)
-			err := ep.hns.deleteEndpoint(ep.hnsID)
-			if err == nil {
-				ep.hnsID = ""
-			} else {
-				klog.ErrorS(err, "Endpoint deletion failed", "ip", ep.IP())
-			}
-		}
+        // Remove the remote hns endpoint, if no service is referring it
+        // Never delete a Local Endpoint. Local Endpoints are already created by other entities.
+        // Remove only remote endpoints created by this service
+        if *info.refCount <= 0 && !info.GetIsLocal() {
+            klog.V(4).InfoS("Removing endpoints, since no one is referencing it", "endpoint", info)
+            err := info.hns.deleteEndpoint(info.hnsID)
+            if err == nil {
+                info.hnsID = ""
+            } else {
+                klog.ErrorS(err, "Endpoint deletion failed", "ip", info.IP())
+            }
+        }
 
-		ep.refCount = nil
-	}
+        info.refCount = nil
+    }
 }

@@ -59,42 +59,68 @@ func (proxier *Proxier) isInitialized() bool {
 }
 
 func (proxier *Proxier) cleanupAllPolicies() {
-	for svcName, svc := range proxier.serviceMap {
-		svcInfo, ok := svc.(*serviceInfo)
-		if !ok {
-			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
-			continue
-		}
-		endpoints := proxier.endpointsMap[svcName.NamespacedName]
-		for _, e := range *endpoints {
-			hns, _ := newHostNetworkService()
-			we := &windowsEndpoint{
-				ip:              e.IPs.First(),
-				port:            0, // TODO
-				isLocal:         e.Local,
-				macAddress:      "TODO",
-				hnsID:           "TODO",
-				refCount:        nil, // TODO
-				providerAddress: "TODO",
-				hns:             hns,
-				ready:           true,  // TODO should always be ready if kpng notifies us, right?
-				serving:         true,  // TODO same as above?
-				terminating:     false, // TODO opposite of above?
+	for svcName, svcPortMap := range proxier.serviceMap {
+		for _, svc := range svcPortMap {
+
+			svcInfo, ok := svc.(*serviceInfo)
+			if !ok {
+				klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
+				continue
 			}
-			svcInfo.cleanupAllPolicies(we)
+			endpoints := proxier.endpointsMap[svcName]
+			for _, e := range *endpoints {
+				svcInfo.cleanupAllPolicies(e)
+			}
 		}
 	}
 }
 
+type loadBalancerInfo struct {
+	hnsID string
+}
+
+type loadBalancerIdentifier struct {
+	protocol       uint16
+	internalPort   uint16
+	externalPort   uint16
+	vip            string
+	endpointsCount int
+}
+
+type loadBalancerFlags struct {
+	isILB           bool
+	isDSR           bool
+	localRoutedVIP  bool
+	useMUX          bool
+	preserveDIP     bool
+	sessionAffinity bool
+	isIPv6          bool
+}
+
+type hnsNetworkInfo struct {
+	name          string
+	id            string
+	networkType   string
+	remoteSubnets []*remoteSubnetInfo
+}
+
+type remoteSubnetInfo struct {
+	destinationPrefix string
+	isolationID       uint16
+	providerAddress   string
+	drMacAddress      string
+}
+
+const NETWORK_TYPE_OVERLAY = "overlay"
+const NETWORK_TYPE_L2BRIDGE = "L2Bridge"
+
 // This is where all of the hns save/restore calls happen.
 // assumes Proxier.mu is held
 func (proxier *Proxier) syncProxyRules() {
-	klog.InfoS("start syncProxyRules")
-
 	proxier.mu.Lock()
 	defer proxier.mu.Unlock()
 
-	// don't sync rules till we've received services and windowsEndpoint
+	// don't sync rules till we've received services and endpoints
 	if !proxier.isInitialized() {
 		klog.V(2).InfoS("Not syncing hns until Services and Endpoints have been received from master")
 		return
@@ -103,8 +129,7 @@ func (proxier *Proxier) syncProxyRules() {
 	// Keep track of how long syncs take.
 	start := time.Now()
 	defer func() {
-
-		//		metrics.SyncProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
+		//metrics.SyncProxyRulesLatency.Observe(metrics.SinceInSeconds(start))
 		klog.V(4).InfoS("Syncing proxy rules complete", "elapsed", time.Since(start))
 	}()
 
@@ -131,359 +156,374 @@ func (proxier *Proxier) syncProxyRules() {
 	staleServices := serviceUpdateResult.UDPStaleClusterIP
 	// merge stale services gathered from updateEndpointsMap
 	for _, svcPortName := range endpointUpdateResult.StaleServiceNames {
-		if svcInfo, ok := proxier.serviceMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
-			klog.V(2).InfoS("Stale udp service", "servicePortName", svcPortName, "clusterIP", svcInfo.ClusterIP())
-			staleServices.Insert(svcInfo.ClusterIP().String())
-		}
+		klog.InfoS("echo %v", svcPortName)
+		//if svcInfo, ok := proxier.serviceMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
+		//	klog.V(2).InfoS("Stale udp service", "servicePortName", svcPortName, "clusterIP", svcInfo.ClusterIP())
+		//	staleServices.Insert(svcInfo.ClusterIP().String())
+		//}
 	}
-
+	// Query HNS for endpoints and load balancers
+	queriedEndpoints, err := hns.getAllEndpointsByNetwork(hnsNetworkName)
+	if err != nil {
+		klog.ErrorS(err, "Querying HNS for endpoints failed")
+		return
+	}
+	if queriedEndpoints == nil {
+		klog.V(4).InfoS("No existing endpoints found in HNS")
+		queriedEndpoints = make(map[string]*(endpointsInfo))
+	}
+	queriedLoadBalancers, err := hns.getAllLoadBalancers()
+	if queriedLoadBalancers == nil {
+		klog.V(4).InfoS("No existing load balancers found in HNS")
+		queriedLoadBalancers = make(map[loadBalancerIdentifier]*(loadBalancerInfo))
+	}
+	if err != nil {
+		klog.ErrorS(err, "Querying HNS for load balancers failed")
+		return
+	}
 	if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
-		existingSourceVip, err := hns.getEndpointByIpAddress(proxier.sourceVip, hnsNetworkName)
-		if existingSourceVip == nil {
+		if _, ok := queriedEndpoints[proxier.sourceVip]; !ok {
 			_, err = newSourceVIP(hns, hnsNetworkName, proxier.sourceVip, proxier.hostMac, proxier.nodeIP.String())
-		}
-		if err != nil {
-			klog.ErrorS(err, "Source Vip endpoint creation failed")
-			return
+			if err != nil {
+				klog.ErrorS(err, "Source Vip endpoint creation failed")
+				return
+			}
 		}
 	}
 
 	klog.V(3).InfoS("Syncing Policies")
 
 	// Program HNS by adding corresponding policies for each service.
-	for svcName, svc := range proxier.serviceMap {
-		svcInfo, ok := svc.(*serviceInfo)
-		if !ok {
-			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
-			continue
-		}
-
-		if svcInfo.policyApplied {
-			klog.V(4).InfoS("Policy already applied", "serviceInfo", svcInfo)
-			continue
-		}
-
-		if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
-			serviceVipEndpoint, _ := hns.getEndpointByIpAddress(svcInfo.ClusterIP().String(), hnsNetworkName)
-			if serviceVipEndpoint == nil {
-				klog.V(4).InfoS("No existing remote endpoint", "IP", svcInfo.ClusterIP())
-				hnsEndpoint := &windowsEndpoint{
-					ip:              svcInfo.ClusterIP().String(),
-					isLocal:         false,
-					macAddress:      proxier.hostMac,
-					providerAddress: proxier.nodeIP.String(),
-				}
-
-				newHnsEndpoint, err := hns.createEndpoint(hnsEndpoint, hnsNetworkName)
-				if err != nil {
-					klog.ErrorS(err, "Remote endpoint creation failed for service VIP")
-					continue
-				}
-				newHnsEndpoint.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
-				*newHnsEndpoint.refCount++
-				svcInfo.remoteEndpoint = newHnsEndpoint
-			}
-		}
-
-		/// Initialize a list of hnsEndpoints for this service.....
-		/// [we1 we2 we3 we4 .....]
-		/// 	->   AFTER we look up the endpoint we;kk update this list
-		var hnsEndpoints []windowsEndpoint
-		var hnsLocalEndpoints []windowsEndpoint
-		klog.V(4).InfoS("Applying Policy", "serviceInfo", svcName)
-		// Create Remote windowsEndpoint for every endpoint, corresponding to the service
-		containsPublicIP := false
-		containsNodeIP := false
-
-		for _, epInfo := range *proxier.endpointsMap[svcName.NamespacedName] {
-
-			// !!!!!!!!!!!!!!!!
-			// ep must be an instance of "windowsEndpoint..."
-			// it is an localvnet1.Endpoint...
-			//			ep, ok := epInfo.(*windowsEndpoint)
-			// !!!!!!!!!!!!!!!!
-			foundWindowsEndpoint, ok := proxier.kpngEndpointCache.findEndpoint(epInfo)
+	for svcName, svcPortMap := range proxier.serviceMap {
+		for _, svc := range svcPortMap {
+			svcInfo, ok := svc.(*serviceInfo)
 			if !ok {
-				klog.ErrorS(nil, "Failed to recover a windows sEndpoint... skippingg, maybe no endpoints for this svc %v %v", "serviceName", svcName)
+				klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
 				continue
 			}
 
-			// by definition all windows endpoints are ready...
-			//if !ep.IsReady() {
-			//	continue
-			//}
-
-			var newHnsEndpoint *windowsEndpoint
-			hnsNetworkName := proxier.network.name
-			var err error
-
-			// targetPort is zero if it is specified as a name in port.TargetPort, so the real port should be got from windowsEndpoint.
-			// Note that hcsshim.AddLoadBalancer() doesn't support windowsEndpoint with different ports, so only port from first endpoint is used.
-			// TODO(feiskyer): add support of different endpoint ports after hcsshim.AddLoadBalancer() add that.
-			// TODO jay : disabling this logic
-			if svcInfo.targetPort == 0 {
-				// TODO jay: See what needs to be done here, maybe pick the first value, i.e. ep.PortOverrides["..."] ?
-				//svcInfo.targetPort = int(ep.port)
+			if svcInfo.policyApplied {
+				klog.V(4).InfoS("Policy already applied", "serviceInfo", svcInfo)
+				continue
 			}
 
-			// Now we look up the hnsID
-			// for the endpoint and
-			// we use that to write the "newHnsEndpoint" that we will put in the
-			/// ARRAY of HNS Endpoints later...
-
-			if len(foundWindowsEndpoint.hnsID) > 0 {
-				// new function
-				hnsID := kpngGetHNS(foundWindowsEndpoint)
-				klog.InfoS("finished getting nhsID hnsID %v", hnsID)
-
-				newHnsEndpoint, err = hns.getEndpointByID(foundWindowsEndpoint.hnsID)
-			}
-
-			if newHnsEndpoint == nil {
-				// First check if an endpoint resource exists for this IP, on the current host
-				// A Local endpoint could exist here already
-				// A remote endpoint was already created and proxy was restarted
-				newHnsEndpoint, err = hns.getEndpointByIpAddress(foundWindowsEndpoint.IP(), hnsNetworkName)
-			}
-			if newHnsEndpoint == nil {
-				if foundWindowsEndpoint.GetIsLocal() {
-					klog.ErrorS(err, "Local endpoint not found: on network", "ip", foundWindowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName)
-					continue
-				}
-
-				if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
-					klog.InfoS("Updating network to check for new remote subnet policies", "networkName", proxier.network.name)
-					networkName := proxier.network.name
-					updatedNetwork, err := hns.getNetworkByName(networkName)
-					if err != nil {
-						klog.ErrorS(err, "Unable to find HNS Network specified, please check network name and CNI deployment", "hnsNetworkName", hnsNetworkName)
-						proxier.cleanupAllPolicies()
-						return
-					}
-					proxier.network = *updatedNetwork
-					providerAddress := proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
-
-					if len(providerAddress) == 0 {
-						klog.InfoS("Could not find provider address, assuming it is a public IP", "IP", foundWindowsEndpoint.IP())
-						providerAddress = proxier.nodeIP.String()
-					}
-
-					hnsEndpoint := &windowsEndpoint{
-						ip:              foundWindowsEndpoint.ip,
+			if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
+				serviceVipEndpoint := queriedEndpoints[svcInfo.ClusterIP().String()]
+				if serviceVipEndpoint == nil {
+					klog.V(4).InfoS("No existing remote endpoint", "IP", svcInfo.ClusterIP())
+					hnsEndpoint := &endpointsInfo{
+						ip:              svcInfo.ClusterIP().String(),
 						isLocal:         false,
-						macAddress:      conjureMac("02-11", netutils.ParseIPSloppy(foundWindowsEndpoint.ip)),
-						providerAddress: providerAddress,
+						macAddress:      proxier.hostMac,
+						providerAddress: proxier.nodeIP.String(),
 					}
-					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
+
+					newHnsEndpoint, err := hns.createEndpoint(hnsEndpoint, hnsNetworkName)
 					if err != nil {
-						klog.ErrorS(err, "Remote endpoint creation failed", "windowsEndpoint", hnsEndpoint)
+						klog.ErrorS(err, "Remote endpoint creation failed for service VIP")
 						continue
 					}
+
+					newHnsEndpoint.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
+					*newHnsEndpoint.refCount++
+					svcInfo.remoteEndpoint = newHnsEndpoint
+					// store newly created endpoints in queriedEndpoints
+					queriedEndpoints[newHnsEndpoint.hnsID] = newHnsEndpoint
+					queriedEndpoints[newHnsEndpoint.ip] = newHnsEndpoint
+				}
+			}
+
+			var hnsEndpoints []endpointsInfo
+			var hnsLocalEndpoints []endpointsInfo
+			klog.V(4).InfoS("Applying Policy", "serviceInfo", svcName)
+			// Create Remote endpoints for every endpoint, corresponding to the service
+			containsPublicIP := false
+			containsNodeIP := false
+
+			endpoints := proxier.endpointsMap[svcName]
+			for _, e := range *endpoints {
+    				ep := &endpointsInfo{
+    				    ip:		e.IPs.First(),
+    				    isLocal:	e.Local,
+    				    hns: 	proxier.hns,
+				    ready:	true,
+				    serving:    true,  // TODO same as above?
+    				}
+ 
+				if !ok {
+					klog.ErrorS(nil, "Failed to cast endpointsInfo", "serviceName", svcName)
+					continue
+				}
+
+				if !ep.IsReady() {
+					continue
+				}
+				var newHnsEndpoint *endpointsInfo
+				hnsNetworkName := proxier.network.name
+				var err error
+
+				// targetPort is zero if it is specified as a name in port.TargetPort, so the real port should be got from endpoints.
+				// Note that hcsshim.AddLoadBalancer() doesn't support endpoints with different ports, so only port from first endpoint is used.
+				// TODO(feiskyer): add support of different endpoint ports after hcsshim.AddLoadBalancer() add that.
+				if svcInfo.targetPort == 0 {
+					svcInfo.targetPort = int(ep.port)
+				}
+				// There is a bug in Windows Server 2019 that can cause two endpoints to be created with the same IP address, so we need to check using endpoint ID first.
+				// TODO: Remove lookup by endpoint ID, and use the IP address only, so we don't need to maintain multiple keys for lookup.
+				if len(ep.hnsID) > 0 {
+					newHnsEndpoint = queriedEndpoints[ep.hnsID]
+				}
+
+				if newHnsEndpoint == nil {
+					// First check if an endpoint resource exists for this IP, on the current host
+					// A Local endpoint could exist here already
+					// A remote endpoint was already created and proxy was restarted
+					newHnsEndpoint = queriedEndpoints[ep.IP()]
+				}
+
+				if newHnsEndpoint == nil {
+					if ep.GetIsLocal() {
+						klog.ErrorS(err, "Local endpoint not found: on network", "ip", ep.IP(), "hnsNetworkName", hnsNetworkName)
+						continue
+					}
+
+					if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) {
+						klog.InfoS("Updating network to check for new remote subnet policies", "networkName", proxier.network.name)
+						networkName := proxier.network.name
+						updatedNetwork, err := hns.getNetworkByName(networkName)
+						if err != nil {
+							klog.ErrorS(err, "Unable to find HNS Network specified, please check network name and CNI deployment", "hnsNetworkName", hnsNetworkName)
+							proxier.cleanupAllPolicies()
+							return
+						}
+						proxier.network = *updatedNetwork
+						providerAddress := proxier.network.findRemoteSubnetProviderAddress(ep.IP())
+						if len(providerAddress) == 0 {
+							klog.InfoS("Could not find provider address, assuming it is a public IP", "IP", ep.IP())
+							providerAddress = proxier.nodeIP.String()
+						}
+
+						hnsEndpoint := &endpointsInfo{
+							ip:              ep.ip,
+							isLocal:         false,
+							macAddress:      conjureMac("02-11", netutils.ParseIPSloppy(ep.ip)),
+							providerAddress: providerAddress,
+						}
+
+						newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
+						if err != nil {
+							klog.ErrorS(err, "Remote endpoint creation failed", "endpointsInfo", hnsEndpoint)
+							continue
+						}
+					} else {
+
+						hnsEndpoint := &endpointsInfo{
+							ip:         ep.ip,
+							isLocal:    false,
+							macAddress: ep.macAddress,
+						}
+
+						newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
+						if err != nil {
+							klog.ErrorS(err, "Remote endpoint creation failed")
+							continue
+						}
+					}
+				}
+				// For Overlay networks 'SourceVIP' on an Load balancer Policy can either be chosen as
+				// a) Source VIP configured on kube-proxy (or)
+				// b) Node IP of the current node
+				//
+				// For L2Bridge network the Source VIP is always the NodeIP of the current node and the same
+				// would be configured on kube-proxy as SourceVIP
+				//
+				// The logic for choosing the SourceVIP in Overlay networks is based on the backend endpoints:
+				// a) Endpoints are any IP's outside the cluster ==> Choose NodeIP as the SourceVIP
+				// b) Endpoints are IP addresses of a remote node => Choose NodeIP as the SourceVIP
+				// c) Everything else (Local POD's, Remote POD's, Node IP of current node) ==> Choose the configured SourceVIP
+				if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !ep.GetIsLocal() {
+					providerAddress := proxier.network.findRemoteSubnetProviderAddress(ep.IP())
+
+					isNodeIP := (ep.IP() == providerAddress)
+					isPublicIP := (len(providerAddress) == 0)
+					klog.InfoS("Endpoint on overlay network", "ip", ep.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
+
+					containsNodeIP = containsNodeIP || isNodeIP
+					containsPublicIP = containsPublicIP || isPublicIP
+				}
+
+				// Save the hnsId for reference
+				klog.V(1).InfoS("Hns endpoint resource", "endpointsInfo", newHnsEndpoint)
+
+				hnsEndpoints = append(hnsEndpoints, *newHnsEndpoint)
+				if newHnsEndpoint.GetIsLocal() {
+					hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
 				} else {
-					hnsEndpoint := &windowsEndpoint{
-						ip:         foundWindowsEndpoint.ip,
-						isLocal:    false,
-						macAddress: foundWindowsEndpoint.macAddress,
-					}
+					// We only share the refCounts for remote endpoints
+					ep.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
+					*ep.refCount++
+				}
 
-					newHnsEndpoint, err = hns.createEndpoint(hnsEndpoint, hnsNetworkName)
+				ep.hnsID = newHnsEndpoint.hnsID
+
+				klog.V(3).InfoS("Endpoint resource found", "endpointsInfo", ep)
+			}
+
+			klog.V(3).InfoS("Associated endpoints for service", "endpointsInfo", hnsEndpoints, "serviceName", svcName)
+
+			if len(svcInfo.hnsID) > 0 {
+				// This should not happen
+				klog.InfoS("Load Balancer already exists -- Debug ", "hnsID", svcInfo.hnsID)
+			}
+
+			if len(hnsEndpoints) == 0 {
+				klog.ErrorS(nil, "Endpoint information not available for service, not applying any policy", "serviceName", svcName)
+				continue
+			}
+
+			klog.V(4).InfoS("Trying to apply Policies for service", "serviceInfo", svcInfo)
+			var hnsLoadBalancer *loadBalancerInfo
+			var sourceVip = proxier.sourceVip
+			if containsPublicIP || containsNodeIP {
+				sourceVip = proxier.nodeIP.String()
+			}
+
+			sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
+			if sessionAffinityClientIP && !proxier.supportedFeatures.SessionAffinity {
+				klog.InfoS("Session Affinity is not supported on this version of Windows")
+			}
+
+			hnsLoadBalancer, err := hns.getLoadBalancer(
+				hnsEndpoints,
+				loadBalancerFlags{isDSR: proxier.isDSR, isIPv6: proxier.isIPv6Mode, sessionAffinity: sessionAffinityClientIP},
+				sourceVip,
+				svcInfo.ClusterIP().String(),
+				Enum(svcInfo.Protocol()),
+				uint16(svcInfo.targetPort),
+				uint16(svcInfo.Port()),
+				queriedLoadBalancers,
+			)
+			if err != nil {
+				klog.ErrorS(err, "Policy creation failed")
+				continue
+			}
+
+			svcInfo.hnsID = hnsLoadBalancer.hnsID
+			klog.V(3).InfoS("Hns LoadBalancer resource created for cluster ip resources", "clusterIP", svcInfo.ClusterIP(), "hnsID", hnsLoadBalancer.hnsID)
+
+			// If nodePort is specified, user should be able to use nodeIP:nodePort to reach the backend endpoints
+			if svcInfo.NodePort() > 0 {
+				// If the preserve-destination service annotation is present, we will disable routing mesh for NodePort.
+				// This means that health services can use Node Port without falsely getting results from a different node.
+				nodePortEndpoints := hnsEndpoints
+				if svcInfo.preserveDIP || svcInfo.localTrafficDSR {
+					nodePortEndpoints = hnsLocalEndpoints
+				}
+
+				if len(nodePortEndpoints) > 0 {
+					hnsLoadBalancer, err := hns.getLoadBalancer(
+						nodePortEndpoints,
+						loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, localRoutedVIP: true, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
+						sourceVip,
+						"",
+						Enum(svcInfo.Protocol()),
+						uint16(svcInfo.targetPort),
+						uint16(svcInfo.NodePort()),
+						queriedLoadBalancers,
+					)
 					if err != nil {
-						klog.ErrorS(err, "Remote endpoint creation failed")
+						klog.ErrorS(err, "Policy creation failed")
 						continue
 					}
+
+					svcInfo.nodePorthnsID = hnsLoadBalancer.hnsID
+					klog.V(3).InfoS("Hns LoadBalancer resource created for nodePort resources", "clusterIP", svcInfo.ClusterIP(), "nodeport", svcInfo.NodePort(), "hnsID", hnsLoadBalancer.hnsID)
+				} else {
+					klog.V(3).InfoS("Skipped creating Hns LoadBalancer for nodePort resources", "clusterIP", svcInfo.ClusterIP(), "nodeport", svcInfo.NodePort(), "hnsID", hnsLoadBalancer.hnsID)
 				}
 			}
 
-			// For Overlay networks 'SourceVIP' on an Load balancer Policy can either be chosen as
-			// a) Source VIP configured on kube-proxy (or)
-			// b) Node IP of the current node
-			//
-			// For L2Bridge network the Source VIP is always the NodeIP of the current node and the same
-			// would be configured on kube-proxy as SourceVIP
-			//
-			// The logic for choosing the SourceVIP in Overlay networks is based on the backend windowsEndpoint:
-			// a) Endpoints are any IP's outside the cluster ==> Choose NodeIP as the SourceVIP
-			// b) Endpoints are IP addresses of a remote node => Choose NodeIP as the SourceVIP
-			// c) Everything else (Local POD's, Remote POD's, Node IP of current node) ==> Choose the configured SourceVIP
-			if strings.EqualFold(proxier.network.networkType, NETWORK_TYPE_OVERLAY) && !foundWindowsEndpoint.GetIsLocal() {
-				providerAddress := proxier.network.findRemoteSubnetProviderAddress(foundWindowsEndpoint.IP())
-
-				isNodeIP := foundWindowsEndpoint.IP() == providerAddress
-				isPublicIP := len(providerAddress) == 0
-				klog.InfoS("Endpoint on overlay network", "ip", foundWindowsEndpoint.IP(), "hnsNetworkName", hnsNetworkName, "isNodeIP", isNodeIP, "isPublicIP", isPublicIP)
-
-				containsNodeIP = containsNodeIP || isNodeIP
-				containsPublicIP = containsPublicIP || isPublicIP
-			}
-
-			// Save the hnsId for reference
-			klog.V(1).InfoS("Hns endpoint resource", "windowsEndpoint", newHnsEndpoint)
-
-			hnsEndpoints = append(hnsEndpoints, *newHnsEndpoint)
-			if newHnsEndpoint.GetIsLocal() {
-				hnsLocalEndpoints = append(hnsLocalEndpoints, *newHnsEndpoint)
-			} else {
-				// We only share the refCounts for remote windowsEndpoint
-				foundWindowsEndpoint.refCount = proxier.endPointsRefCount.getRefCount(newHnsEndpoint.hnsID)
-				*foundWindowsEndpoint.refCount++
-			}
-			foundWindowsEndpoint.hnsID = newHnsEndpoint.hnsID
-			klog.V(3).InfoS("Endpoint resource found and added to the hnsEndpoints array", "windowsEndpoint", foundWindowsEndpoint)
-		}
-
-		// TODO there's no foundWindowsEndpoint in scope right now -- so what should this be?
-		//kpngStoreEndpoint(foundWindowsEndpoint) // remember this endpoint
-
-		klog.V(3).InfoS("Associated windowsEndpoint for service", "windowsEndpoint", hnsEndpoints, "serviceName", svcName)
-
-		if len(svcInfo.hnsID) > 0 {
-			// This should not happen
-			klog.InfoS("Load Balancer already exists -- Debug ", "hnsID", svcInfo.hnsID)
-		}
-
-		if len(hnsEndpoints) == 0 {
-			klog.ErrorS(nil, "Endpoint information not available for service, not applying any policy", "serviceName", svcName)
-			continue
-		}
-
-		klog.V(4).InfoS("Trying to apply Policies for service", "serviceInfo", svcInfo)
-		var hnsLoadBalancer *loadBalancerInfo
-		var sourceVip = proxier.sourceVip
-		if containsPublicIP || containsNodeIP {
-			sourceVip = proxier.nodeIP.String()
-		}
-
-		sessionAffinityClientIP := svcInfo.SessionAffinityType() == v1.ServiceAffinityClientIP
-		if sessionAffinityClientIP && !proxier.supportedFeatures.SessionAffinity {
-			klog.InfoS("Session Affinity is not supported on this version of Windows")
-		}
-
-		hnsLoadBalancer, err := hns.getLoadBalancer(
-			hnsEndpoints,
-			loadBalancerFlags{isDSR: proxier.isDSR, isIPv6: proxier.isIPv6Mode, sessionAffinity: sessionAffinityClientIP},
-			sourceVip,
-			svcInfo.ClusterIP().String(),
-			Enum(svcInfo.Protocol()),
-			uint16(svcInfo.targetPort),
-			uint16(svcInfo.Port()),
-		)
-		if err != nil {
-			klog.ErrorS(err, "Policy creation failed")
-			continue
-		}
-
-		svcInfo.hnsID = hnsLoadBalancer.hnsID
-		klog.V(3).InfoS("Hns LoadBalancer resource created for cluster ip resources", "clusterIP", svcInfo.ClusterIP(), "hnsID", hnsLoadBalancer.hnsID)
-
-		// If nodePort is specified, user should be able to use nodeIP:nodePort to reach the backend windowsEndpoint
-		if svcInfo.NodePort() > 0 {
-			// If the preserve-destination service annotation is present, we will disable routing mesh for NodePort.
-			// This means that health services can use Node Port without falsely getting results from a different node.
-			nodePortEndpoints := hnsEndpoints
-			if svcInfo.preserveDIP || svcInfo.localTrafficDSR {
-				nodePortEndpoints = hnsLocalEndpoints
-			}
-
-			if len(nodePortEndpoints) > 0 {
-				hnsLoadBalancer, err := hns.getLoadBalancer(
-					nodePortEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, localRoutedVIP: true, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
-					sourceVip,
-					"",
-					Enum(svcInfo.Protocol()),
-					uint16(svcInfo.targetPort),
-					uint16(svcInfo.NodePort()),
-				)
-				if err != nil {
-					klog.ErrorS(err, "Policy creation failed")
-					continue
+			// Create a Load Balancer Policy for each external IP
+			for _, externalIP := range svcInfo.externalIPs {
+				// Disable routing mesh if ExternalTrafficPolicy is set to local
+				externalIPEndpoints := hnsEndpoints
+				if svcInfo.localTrafficDSR {
+					externalIPEndpoints = hnsLocalEndpoints
 				}
 
-				svcInfo.nodePorthnsID = hnsLoadBalancer.hnsID
-				klog.V(3).InfoS("Hns LoadBalancer resource created for nodePort resources", "clusterIP", svcInfo.ClusterIP(), "nodeport", svcInfo.NodePort(), "hnsID", hnsLoadBalancer.hnsID)
-			} else {
-				klog.V(3).InfoS("Skipped creating Hns LoadBalancer for nodePort resources", "clusterIP", svcInfo.ClusterIP(), "nodeport", svcInfo.NodePort(), "hnsID", hnsLoadBalancer.hnsID)
+				if len(externalIPEndpoints) > 0 {
+					// Try loading existing policies, if already available
+					hnsLoadBalancer, err = hns.getLoadBalancer(
+						externalIPEndpoints,
+						loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
+						sourceVip,
+						externalIP.ip,
+						Enum(svcInfo.Protocol()),
+						uint16(svcInfo.targetPort),
+						uint16(svcInfo.Port()),
+						queriedLoadBalancers,
+					)
+					if err != nil {
+						klog.ErrorS(err, "Policy creation failed")
+						continue
+					}
+					externalIP.hnsID = hnsLoadBalancer.hnsID
+					klog.V(3).InfoS("Hns LoadBalancer resource created for externalIP resources", "externalIP", externalIP, "hnsID", hnsLoadBalancer.hnsID)
+				} else {
+					klog.V(3).InfoS("Skipped creating Hns LoadBalancer for externalIP resources", "externalIP", externalIP, "hnsID", hnsLoadBalancer.hnsID)
+				}
 			}
-		}
-
-		// Create a Load Balancer Policy for each external IP
-		for _, externalIP := range svcInfo.externalIPs {
-			// Disable routing mesh if ExternalTrafficPolicy is set to local
-			externalIPEndpoints := hnsEndpoints
-			if svcInfo.localTrafficDSR {
-				externalIPEndpoints = hnsLocalEndpoints
-			}
-
-			if len(externalIPEndpoints) > 0 {
+			// Create a Load Balancer Policy for each loadbalancer ingress
+			for _, lbIngressIP := range svcInfo.loadBalancerIngressIPs {
 				// Try loading existing policies, if already available
-				hnsLoadBalancer, err = hns.getLoadBalancer(
-					externalIPEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.localTrafficDSR, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
-					sourceVip,
-					externalIP.ip,
-					Enum(svcInfo.Protocol()),
-					uint16(svcInfo.targetPort),
-					uint16(svcInfo.Port()),
-				)
-				if err != nil {
-					klog.ErrorS(err, "Policy creation failed")
-					continue
+				lbIngressEndpoints := hnsEndpoints
+				if svcInfo.preserveDIP || svcInfo.localTrafficDSR {
+					lbIngressEndpoints = hnsLocalEndpoints
 				}
-				externalIP.hnsID = hnsLoadBalancer.hnsID
-				klog.V(3).InfoS("Hns LoadBalancer resource created for externalIP resources", "externalIP", externalIP, "hnsID", hnsLoadBalancer.hnsID)
-			} else {
-				klog.V(3).InfoS("Skipped creating Hns LoadBalancer for externalIP resources", "externalIP", externalIP, "hnsID", hnsLoadBalancer.hnsID)
-			}
-		}
-		// Create a Load Balancer Policy for each loadbalancer ingress
-		for _, lbIngressIP := range svcInfo.loadBalancerIngressIPs {
-			// Try loading existing policies, if already available
-			lbIngressEndpoints := hnsEndpoints
-			if svcInfo.preserveDIP || svcInfo.localTrafficDSR {
-				lbIngressEndpoints = hnsLocalEndpoints
-			}
 
-			if len(lbIngressEndpoints) > 0 {
-				hnsLoadBalancer, err := hns.getLoadBalancer(
-					lbIngressEndpoints,
-					loadBalancerFlags{isDSR: svcInfo.preserveDIP || svcInfo.localTrafficDSR, useMUX: svcInfo.preserveDIP, preserveDIP: svcInfo.preserveDIP, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
-					sourceVip,
-					lbIngressIP.ip,
-					Enum(svcInfo.Protocol()),
-					uint16(svcInfo.targetPort),
-					uint16(svcInfo.Port()),
-				)
-				if err != nil {
-					klog.ErrorS(err, "Policy creation failed")
-					continue
+				if len(lbIngressEndpoints) > 0 {
+					hnsLoadBalancer, err := hns.getLoadBalancer(
+						lbIngressEndpoints,
+						loadBalancerFlags{isDSR: svcInfo.preserveDIP || svcInfo.localTrafficDSR, useMUX: svcInfo.preserveDIP, preserveDIP: svcInfo.preserveDIP, sessionAffinity: sessionAffinityClientIP, isIPv6: proxier.isIPv6Mode},
+						sourceVip,
+						lbIngressIP.ip,
+						Enum(svcInfo.Protocol()),
+						uint16(svcInfo.targetPort),
+						uint16(svcInfo.Port()),
+						queriedLoadBalancers,
+					)
+					if err != nil {
+						klog.ErrorS(err, "Policy creation failed")
+						continue
+					}
+					lbIngressIP.hnsID = hnsLoadBalancer.hnsID
+					klog.V(3).InfoS("Hns LoadBalancer resource created for loadBalancer Ingress resources", "lbIngressIP", lbIngressIP)
+				} else {
+					klog.V(3).InfoS("Skipped creating Hns LoadBalancer for loadBalancer Ingress resources", "lbIngressIP", lbIngressIP)
 				}
 				lbIngressIP.hnsID = hnsLoadBalancer.hnsID
 				klog.V(3).InfoS("Hns LoadBalancer resource created for loadBalancer Ingress resources", "lbIngressIP", lbIngressIP)
-			} else {
-				klog.V(3).InfoS("Skipped creating Hns LoadBalancer for loadBalancer Ingress resources", "lbIngressIP", lbIngressIP)
-			}
 
+			}
+			svcInfo.policyApplied = true
+			klog.V(2).InfoS("Policy successfully applied for service", "serviceInfo", svcInfo)
 		}
-		svcInfo.policyApplied = true
-		klog.V(2).InfoS("Policy successfully applied for service", "serviceInfo", svcInfo)
 	}
 
-	// TODO Jay:avoiding pkg/proxy imports... Commented out more healthServer stuff... going to kill it or keep it ?
-
-	//	if proxier.healthzServer != nil {
-	//		proxier.healthzServer.Updated()
-	//	}
+	if proxier.healthzServer != nil {
+		proxier.healthzServer.Updated()
+	}
 	//metrics.SyncProxyRulesLastTimestamp.SetToCurrentTime()
 
-	// Update service healthchecks.  The windowsEndpoint list might include services that are
+	// Update service healthchecks.  The endpoints list might include services that are
 	// not "OnlyLocal", but the services list will not, and the serviceHealthServer
-	// will just drop those windowsEndpoint.
-	//	if err := proxier.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
-	//		klog.ErrorS(err, "Error syncing healthcheck services")
-	//	}
-	//	if err := proxier.serviceHealthServer.SyncEndpoints(endpointUpdateResult.HCEndpointsLocalIPSize); err != nil {
-	//		klog.ErrorS(err, "Error syncing healthcheck windowsEndpoint")
-	//	}
+	// will just drop those endpoints.
+	if err := proxier.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
+		klog.ErrorS(err, "Error syncing healthcheck services")
+	}
+	if err := proxier.serviceHealthServer.SyncEndpoints(endpointUpdateResult.HCEndpointsLocalIPSize); err != nil {
+		klog.ErrorS(err, "Error syncing healthcheck endpoints")
+	}
 
 	// Finish housekeeping.
 	// TODO: these could be made more consistent.

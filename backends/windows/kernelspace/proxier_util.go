@@ -51,8 +51,6 @@ type Provider interface {
 // Proxier (windows/kernelspace/Proxier) is copied impl of windows kernel based proxy for connections between a localhost:lport
 // and services that provide the actual backends.
 type Proxier struct {
-	kpngEndpointCache *kpngEndpointCache
-
 	// TODO(imroc): implement node handler for winkernel proxier.
 	//proxyconfig.NoopNodeHandler
 	// endpointsChanges and serviceChanges contains all changes to windowsEndpoint and
@@ -63,7 +61,7 @@ type Proxier struct {
 	serviceChanges    *ServiceChangeTracker
 	endPointsRefCount endPointsReferenceCountMap
 	mu                sync.Mutex // protects the following fields
-	serviceMap        ServiceMap
+	serviceMap        ServicesSnapshot
 	endpointsMap      EndpointsMap
 	// endpointSlicesSynced and servicesSynced are set to true when corresponding
 	// objects are synced after startup. This is used to avoid updating hns policies
@@ -89,7 +87,7 @@ type Proxier struct {
 	// precomputing some number of those and cache for future reuse.
 	precomputedProbabilities []string
 
-	hns               HostNetworkService
+	hns               HCNUtils
 	network           hnsNetworkInfo
 	sourceVip         string
 	hostMac           string

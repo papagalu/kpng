@@ -56,8 +56,8 @@ type serviceInfo struct {
 	hnsID                  string
 	nodePorthnsID          string
 	policyApplied          bool
-	remoteEndpoint         *windowsEndpoint
-	hns                    HostNetworkService
+	remoteEndpoint         *endpointsInfo
+	hns                    HCNUtils
 	preserveDIP            bool
 	localTrafficDSR        bool
 
@@ -84,13 +84,20 @@ func (svcInfo *serviceInfo) deleteAllHnsLoadBalancerPolicy() {
 	}
 }
 
-func (svcInfo *serviceInfo) cleanupAllPolicies(proxyEndpoints *windowsEndpoint) {
-	klog.V(3).InfoS("Service cleanup", "serviceInfo", svcInfo)
-	// Skip the svcInfo.policyApplied check to remove all the policies
-	svcInfo.deleteAllHnsLoadBalancerPolicy()
-	if svcInfo.remoteEndpoint != nil {
-		svcInfo.remoteEndpoint.Cleanup()
-	}
+func (svcInfo *serviceInfo) cleanupAllPolicies(e *localnetv1.Endpoint) {
+    klog.V(3).InfoS("Service cleanup", "serviceInfo", svcInfo)
+    // Skip the svcInfo.policyApplied check to remove all the policies
+    svcInfo.deleteAllHnsLoadBalancerPolicy()
+    // Cleanup Endpoints references
+    epInfo := &endpointsInfo{
+	ip:		e.IPs.First(),
+	isLocal:	e.Local,
+	hns: 		svcInfo.hns,
+    }
+    epInfo.Cleanup()
+    if svcInfo.remoteEndpoint != nil {
+        svcInfo.remoteEndpoint.Cleanup()
+    }
 
-	svcInfo.policyApplied = false
+    svcInfo.policyApplied = false
 }

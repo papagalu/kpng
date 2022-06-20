@@ -37,8 +37,11 @@ type BaseEndpointInfo struct {
 	Zone string
 }
 
-// windowsEndpoint implements Endpoint
-var _ Endpoint = &windowsEndpoint{}
+func (ep *BaseEndpointInfo) GetTopology() map[string]string {
+     return map[string]string{}
+}
+
+var _ Endpoint = &BaseEndpointInfo{}
 
 // String is part of proxy.Endpoint interface.
 func (info *BaseEndpointInfo) String() string {
