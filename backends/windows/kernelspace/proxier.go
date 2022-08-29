@@ -274,6 +274,7 @@ func NewProxier(
 	masqueradeAll bool,
 	masqueradeBit int,
 	clusterCIDR string,
+	sourceVip string,
 	hostname string,
 	nodeIP net.IP,
 	recorder events.EventRecorder, // ignore
@@ -408,7 +409,7 @@ func NewProxier(
 		healthzServer:       healthzServer,
 		hns:                 hns,
 		network:             *hnsNetworkInfo,
-		sourceVip:           "100.244.206.65",
+		sourceVip:           sourceVip,
 		hostMac:             hostMac,
 		isDSR:               isDSR,
 		supportedFeatures:   supportedFeatures,

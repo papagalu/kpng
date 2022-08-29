@@ -84,11 +84,17 @@ var (
 		"10.20.30.11",
 		"cluster IPs CIDR",
 	)
+
+	sourceVip = flag.String(
+		"sourceVip",
+		"100.244.206.65",
+		"SourceVIP"
+	)
 	winkernelConfig KubeProxyWinkernelConfiguration
 )
 
 /* BindFlags will bind the flags */
-func BindFlags(flags *pflag.FlagSet) {
+func (s *Backend) BindFlags(flags *pflag.FlagSet) {
 	flags.AddFlagSet(flag)
 }
 
@@ -157,6 +163,7 @@ func (s *Backend) Setup() {
 		*masqueradeAll,
 		*masqueradeBit,
 		*clusterCIDR,
+		*sourceVip,
 		*hostname,
 		netutils.ParseIPSloppy(*nodeip),
 		recorder,
