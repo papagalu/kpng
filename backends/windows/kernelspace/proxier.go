@@ -650,6 +650,7 @@ func (proxier *Proxier) syncProxyRules() {
 						hns:     proxier.hns,
 						ready:   true,
 						serving: true, // TODO same as above?
+						port:    e.PortOverrides[0].Port
 					}
 
 					if !ok {
