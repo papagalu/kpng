@@ -93,17 +93,19 @@ func (svcInfo *serviceInfo) deleteAllHnsLoadBalancerPolicy() {
 	}
 }
 
-func (svcInfo *serviceInfo) cleanupAllPolicies(e *localnetv1.Endpoint) {
+func (svcInfo *serviceInfo) cleanupAllPolicies(endpointsmap *endpointsInfoByName) {
 	klog.V(3).InfoS("Service cleanup", "serviceInfo", svcInfo)
 	// Skip the svcInfo.policyApplied check to remove all the policies
 	svcInfo.deleteAllHnsLoadBalancerPolicy()
 	// Cleanup Endpoints references
-	epInfo := &endpointsInfo{
-		ip:      e.IPs.First(),
-		isLocal: e.Local,
-		hns:     svcInfo.hns,
+	for _, ep := range *endpointsmap {
+		epInfo := &endpointsInfo{
+			ip:      ep.IPs.First(),
+			isLocal: ep.Local,
+			hns:     svcInfo.hns,
+		}
+		epInfo.Cleanup()
 	}
-	epInfo.Cleanup()
 	if svcInfo.remoteEndpoint != nil {
 		svcInfo.remoteEndpoint.Cleanup()
 	}
@@ -308,8 +310,8 @@ func getLoadBalancerIPs(ips *localnetv1.IPSet, ipFamily v1.IPFamily) []string {
 
 }
 
-//TODO: Would be better to have SourceRanges also as IPSet instead?
-//Change the code to return based on ipfamily once that is done.
+// TODO: Would be better to have SourceRanges also as IPSet instead?
+// Change the code to return based on ipfamily once that is done.
 func getLoadbalancerSourceRanges(filters []*localnetv1.IPFilter) []string {
 	var sourceRanges []string
 	for _, filter := range filters {
@@ -352,8 +354,10 @@ func NewServiceChangeTracker(makeServiceInfo makeServicePortFunc, ipFamily v1.IP
 // otherwise return false.  Update can be used to add/update/delete items of ServiceChangeMap.  For example,
 // Add item
 //   - pass <nil, service> as the <previous, current> pair.
+//
 // Update item
 //   - pass <oldService, service> as the <previous, current> pair.
+//
 // Delete item
 //   - pass <service, nil> as the <previous, current> pair.
 func (sct *ServiceChangeTracker) Update(current *localnetv1.Service) bool {

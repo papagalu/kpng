@@ -218,27 +218,6 @@ func (ect *EndpointChangeTracker) checkoutTriggerTimes(lastChangeTriggerTimes *m
 	ect.lastChangeTriggerTimes = make(map[types.NamespacedName][]time.Time)
 }
 
-// getLastChangeTriggerTime returns the time.Time value of the
-// EndpointsLastChangeTriggerTime annotation stored in the given windowsEndpoint
-// object or the "zero" time if the annotation wasn't set or was set
-// incorrectly.
-func getLastChangeTriggerTime(annotations map[string]string) time.Time {
-	// TODO(#81360): ignore case when Endpoint is deleted.
-	if _, ok := annotations[v1.EndpointsLastChangeTriggerTime]; !ok {
-		// It's possible that the Endpoints object won't have the
-		// EndpointsLastChangeTriggerTime annotation set. In that case return
-		// the 'zero value', which is ignored in the upstream code.
-		return time.Time{}
-	}
-	val, err := time.Parse(time.RFC3339Nano, annotations[v1.EndpointsLastChangeTriggerTime])
-	if err != nil {
-		klog.Warningf("Error while parsing EndpointsLastChangeTriggerTimeAnnotation: '%s'. Error is %v",
-			annotations[v1.EndpointsLastChangeTriggerTime], err)
-		// In case of error val = time.Zero, which is ignored in the upstream code.
-	}
-	return val
-}
-
 // UpdateEndpointMapResult is the updated results after applying windowsEndpoint changes.
 type UpdateEndpointMapResult struct {
 	// HCEndpointsLocalIPSize maps an windowsEndpoint name to the length of its local IPs.
@@ -383,7 +362,6 @@ func (cache *EndpointsCache) updatePending(svcKey types.NamespacedName, key stri
 		esInfoMap = &endpointsInfoByName{}
 		cache.trackerByServiceMap[svcKey] = esInfoMap
 	}
-
 	(*esInfoMap)[key] = we
 	return true
 }

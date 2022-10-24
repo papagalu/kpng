@@ -25,6 +25,7 @@ import (
 
 	"github.com/spf13/pflag"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	klog "k8s.io/klog/v2"
 	netutils "k8s.io/utils/net"
@@ -122,6 +123,8 @@ func (s *Backend) Sink() localsink.Sink {
 }
 
 func (s *Backend) DeleteEndpoint(namespace, serviceName, key string) {
+	svcName := types.NamespacedName{Namespace: namespace, Name: serviceName}
+	proxier.deleteEndpoint(&svcName)
 	proxier.endpointsChanges.EndpointUpdate(namespace, serviceName, key, nil)
 
 }
@@ -133,6 +136,8 @@ func (s *Backend) SetService(svc *localnetv1.Service) {
 }
 
 func (s *Backend) DeleteService(namespace, name string) {
+	svcName := types.NamespacedName{Namespace: namespace, Name: name}
+	proxier.deleteService(&svcName)
 	proxier.serviceChanges.Delete(namespace, name)
 }
 

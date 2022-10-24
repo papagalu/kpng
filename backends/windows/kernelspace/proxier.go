@@ -21,6 +21,7 @@ package kernelspace
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/types"
 	"net"
 	"os"
 	"strings"
@@ -442,6 +443,63 @@ func (proxier *Proxier) Sync() {
 	proxier.syncRunner.Run()
 }
 
+func (proxier *Proxier) deleteEndpoint(svcName *types.NamespacedName) {
+	svcPortMap, exists := proxier.serviceMap[*svcName]
+	for _, svc := range svcPortMap {
+		if exists {
+			svcInfo, ok := svc.(*serviceInfo)
+
+			if !ok {
+				klog.ErrorS(nil, "Failed to cast serviceInfo", "servicePortName", svcName)
+				return
+			}
+
+			klog.V(3).InfoS("Endpoints are modified. Service is stale", "servicePortName", svcName)
+			svcInfo.cleanupAllPolicies(proxier.endpointsMap[*svcName])
+		} else {
+			// If no service exists, just cleanup the remote endpoints
+			klog.V(3).InfoS("Endpoints are orphaned, cleaning up")
+			// Cleanup Endpoints references
+			epInfos, exists := proxier.endpointsMap[*svcName]
+
+			if exists {
+				// Cleanup Endpoints references
+				for _, ep := range *epInfos {
+					epInfo := &endpointsInfo{
+						ip:      ep.IPs.First(),
+						isLocal: ep.Local,
+						hns:     proxier.hns,
+						ready:   true,
+						serving: true, // TODO same as above?
+						port:    uint16(ep.PortOverrides[0].Port),
+					}
+
+					epInfo.Cleanup()
+
+				}
+			}
+		}
+	}
+}
+
+func (proxier *Proxier) deleteService(svcName *types.NamespacedName) {
+
+	svcPortMap, exists := proxier.serviceMap[*svcName]
+	for _, svc := range svcPortMap {
+		if exists {
+			svcInfo, ok := svc.(*serviceInfo)
+
+			if !ok {
+				klog.ErrorS(nil, "Failed to cast serviceInfo", "servicePortName", svcName)
+				return
+			}
+
+			klog.V(3).InfoS("Updating existing service port", "servicePortName", svcName, "clusterIP", svcInfo.ClusterIP(), "port", svcInfo.Port(), "protocol", svcInfo.Protocol())
+			svcInfo.cleanupAllPolicies(proxier.endpointsMap[*svcName])
+		}
+	}
+}
+
 // SyncLoop runs periodic work.  This is expected to run as a goroutine or as the main loop of the app.  It does not return.
 func (proxier *Proxier) SyncLoop() {
 	// Update healthz timestamp at beginning in case Sync() never succeeds.
@@ -468,9 +526,7 @@ func (proxier *Proxier) cleanupAllPolicies() {
 			}
 			endpoints := proxier.endpointsMap[svcName]
 			if endpoints != nil {
-				for _, e := range *endpoints {
-					svcInfo.cleanupAllPolicies(e)
-				}
+				svcInfo.cleanupAllPolicies(endpoints)
 			}
 		}
 	}
